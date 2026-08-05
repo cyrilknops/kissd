@@ -48,7 +48,7 @@ about how your host is arranged, and gets out of the way.
 | 🧠 **Memory at rest** | **31 MB** |
 | ⚡ **Cold start** | **1.4 s** |
 | 🏃 **22 containers listed in** | **0.16 s** |
-| 📦 **Image** | **469 MB** — or 1.02 GB with Claude Code bundled |
+| 📦 **Image** | **469 MB** |
 | 📜 **Source** | **3,678 lines** (1,585 server · 2,093 web) |
 | 🔌 **Runtime dependencies** | **8** server · **5** web |
 | 🗄️ **Database** | **none** — settings are one JSON file |
@@ -64,7 +64,7 @@ about how your host is arranged, and gets out of the way.
 | 📈 **Host metrics** | CPU, load, memory, swap, network throughput, per-mount disk usage |
 | 🔔 **Alerts** | ntfy push when a container stops, goes unhealthy, or enters a restart loop — plus disk, memory and load thresholds |
 | 🧹 **Maintenance** | Disk usage breakdown and per-target pruning, with named volumes handled one at a time |
-| 💻 **Terminals** | A shell in any container, a root shell on the host, and Claude Code — all in the browser |
+| 💻 **Terminals** | A shell in any container, and a root shell on the host — both in the browser |
 
 Everything is one screen deep. No wizard, no onboarding, no marketplace, no
 telemetry.
@@ -114,10 +114,6 @@ docker compose up -d --build
 
 Point your proxy at `kissd:8090`. **Websocket upgrades must be enabled** — the
 terminals and log streaming will not work without them.
-
-> 💡 Don't want the bundled Claude Code CLI? Build with
-> `--build-arg WITH_CLAUDE=0` and the image drops from 1.02 GB to 469 MB.
-> Everything except the Claude tab works exactly the same.
 
 <details>
 <summary>📋 Nginx Proxy Manager settings</summary>
@@ -211,15 +207,6 @@ so host metrics come from the host's namespaces (`/proc/1/net/dev`,
 `/proc/1/mounts`) rather than the container's, and `privileged` so `nsenter` can
 reach PID 1 for the host shell. **If you do not want a host shell, drop both** —
 everything except that one feature keeps working.
-
-## 🤖 Claude Code
-
-The **Claude** terminal tab runs [Claude Code](https://claude.com/claude-code)
-inside the container, with `$HOME` on the `data/` volume so your login survives
-restarts. Sign in once via the browser terminal and it stays signed in.
-
-Ask it to explain why a container keeps restarting, and it can read the logs
-itself.
 
 ## 🛠️ Built with
 
