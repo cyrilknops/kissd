@@ -1,33 +1,45 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
   <defs>
-    <linearGradient id="lip" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#ff6b8a"/>
+    <linearGradient id="upper" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#e82a4d"/>
+      <stop offset="100%" stop-color="#c81f3f"/>
+    </linearGradient>
+    <linearGradient id="lower" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ff5c7c"/>
       <stop offset="100%" stop-color="#e02a4d"/>
     </linearGradient>
   </defs>
 
   <rect width="64" height="64" rx="14" fill="#12151d"/>
 
-  <!-- Lips: two upper lobes meeting at a cupid's bow, one lower curve.
-       Kept chunky so it still reads as a kiss at 16px. -->
-  <path fill="url(#lip)" d="
-    M32 24
-    C28 16 18 15 12 21
-    C9 24 9 27 11 29
-    C7 31 8 36 12 39
-    C18 44 26 48 32 48
-    C38 48 46 44 52 39
-    C56 36 57 31 53 29
-    C55 27 55 24 52 21
-    C46 15 36 16 32 24
+  <!-- Upper lip: two peaks with a cupid's bow dip between them. Drawn as its
+       own shape so the gap below it reads as the mouth line — that separation
+       is what stops the mark looking like a heart. -->
+  <path fill="url(#upper)" d="
+    M6 32
+    C12 22 19 18 24 21
+    C28 23 30 26 32 26
+    C34 26 36 23 40 21
+    C45 18 52 22 58 32
+    C50 28 41 27 32 27
+    C23 27 14 28 6 32
     Z"/>
 
-  <!-- Highlight on the lower lip. -->
-  <path fill="#fff" opacity=".22" d="
-    M18 35
-    C24 39 28 41 32 41
-    C36 41 40 39 46 35
-    C40 41 36 43 32 43
-    C28 43 24 41 18 35
+  <!-- Lower lip: one wide, shallow curve. Deliberately flat-bottomed. -->
+  <path fill="url(#lower)" d="
+    M6 35
+    C14 33 23 32 32 32
+    C41 32 50 33 58 35
+    C52 43 43 48 32 48
+    C21 48 12 43 6 34
+    Z"/>
+
+  <!-- Sheen on the lower lip. -->
+  <path fill="#fff" opacity=".25" d="
+    M16 38
+    C22 41 27 42 32 42
+    C37 42 42 41 48 38
+    C42 43 37 45 32 45
+    C27 45 22 43 16 38
     Z"/>
 </svg>

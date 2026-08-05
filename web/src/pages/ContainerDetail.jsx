@@ -79,6 +79,7 @@ export default function ContainerDetail({ onOpenShell }) {
   if (!c) return <p className="dim">Loading…</p>;
 
   const memPct = c.stats?.memoryLimit ? (c.stats.memory / c.stats.memoryLimit) * 100 : 0;
+  const composeFile = c.compose?.files?.[0] || null;
 
   return (
     <>
@@ -116,6 +117,14 @@ export default function ContainerDetail({ onOpenShell }) {
           <button className="btn sm" disabled={!c.running}
                   onClick={() => { onOpenShell({ id: c.id, name: c.name }); navigate('/terminal'); }}>
             Shell
+          </button>
+          <button
+            className="btn sm"
+            disabled={!composeFile}
+            title={composeFile || 'Not compose-managed'}
+            onClick={() => navigate(`/compose?file=${encodeURIComponent(composeFile)}`)}
+          >
+            Compose file
           </button>
           <button className="btn sm primary" disabled={busy || !c.compose}
                   title={c.compose ? 'docker compose pull && up -d' : 'Not compose-managed'}
