@@ -12,6 +12,7 @@ import * as host from './host.js';
 import * as alerts from './alerts.js';
 import * as system from './system.js';
 import * as claude from './claude.js';
+import * as compose from './compose.js';
 import { send as ntfySend } from './ntfy.js';
 import { handleTerminal, handleLogs } from './terminal.js';
 
@@ -177,6 +178,66 @@ app.post('/api/system/volumes/remove', auth.requireElevated, async (req, res) =>
     return res.json(await system.removeVolume(name));
   } catch (err) {
     return res.status(400).json({ error: err.message });
+  }
+});
+
+// --- compose files ---------------------------------------------------------
+
+app.get('/api/compose', auth.requireAuth, async (req, res) => {
+  try {
+    res.json(await compose.projects());
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/compose/file', auth.requireAuth, async (req, res) => {
+  try {
+    res.json(await compose.read(String(req.query.path || '')));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.put('/api/compose/file', auth.requireAuth, async (req, res) => {
+  const { path: filePath, content, mtimeMs } = req.body || {};
+  try {
+    const result = await compose.write(String(filePath || ''), content, mtimeMs);
+    // A syntax error is the expected outcome of a bad edit, not a server fault.
+    return res.status(result.valid === false ? 422 : 200).json(result);
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/compose/apply', auth.requireAuth, async (req, res) => {
+  const { project } = req.body || {};
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('X-Accel-Buffering', 'no');
+  try {
+    const code = await compose.apply(String(project || ''), (chunk) => res.write(chunk));
+    res.write(code === 0 ? '\nApplied.\n' : `\nFailed (exit ${code}).\n`);
+  } catch (err) {
+    res.write(`\nError: ${err.message}\n`);
+  }
+  res.end();
+});
+
+app.get('/api/compose/backups', auth.requireAuth, async (req, res) => {
+  try {
+    res.json(await compose.backups(String(req.query.project || '')));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/api/compose/backup', auth.requireAuth, async (req, res) => {
+  try {
+    const content = await compose.readBackup(String(req.query.project || ''), String(req.query.name || ''));
+    res.json({ content });
+  } catch (err) {
+    res.status(404).json({ error: 'Backup not found' });
   }
 });
 

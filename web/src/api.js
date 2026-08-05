@@ -36,6 +36,13 @@ export const api = {
   prune: (target) => req('POST', `/api/system/prune/${target}`),
   removeVolume: (name) => req('POST', '/api/system/volumes/remove', { name }),
 
+  composeProjects: () => req('GET', '/api/compose'),
+  composeFile: (p) => req('GET', `/api/compose/file?path=${encodeURIComponent(p)}`),
+  saveComposeFile: (path, content, mtimeMs) => req('PUT', '/api/compose/file', { path, content, mtimeMs }),
+  composeBackups: (project) => req('GET', `/api/compose/backups?project=${encodeURIComponent(project)}`),
+  composeBackup: (project, name) =>
+    req('GET', `/api/compose/backup?project=${encodeURIComponent(project)}&name=${encodeURIComponent(name)}`),
+
   claude: () => req('GET', '/api/claude'),
   uninstallClaude: () => req('POST', '/api/claude/uninstall'),
 
@@ -65,8 +72,13 @@ export async function streamUpdate(id, onChunk) {
 }
 
 // Same streaming shape as the container update: plain text, as it happens.
-export async function streamPost(url, onChunk) {
-  const res = await fetch(url, { method: 'POST', credentials: 'same-origin' });
+export async function streamPost(url, onChunk, body) {
+  const res = await fetch(url, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: body ? { 'Content-Type': 'application/json' } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
   if (!res.ok && res.headers.get('content-type')?.includes('application/json')) {
     const data = await res.json().catch(() => ({}));
     throw new Error(data.error || `Request failed (${res.status})`);

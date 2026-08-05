@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="lip" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ff6b8a"/>
+      <stop offset="100%" stop-color="#e02a4d"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="64" height="64" rx="14" fill="#12151d"/>
+
+  <!-- Lips: two upper lobes meeting at a cupid's bow, one lower curve.
+       Kept chunky so it still reads as a kiss at 16px. -->
+  <path fill="url(#lip)" d="
+    M32 24
+    C28 16 18 15 12 21
+    C9 24 9 27 11 29
+    C7 31 8 36 12 39
+    C18 44 26 48 32 48
+    C38 48 46 44 52 39
+    C56 36 57 31 53 29
+    C55 27 55 24 52 21
+    C46 15 36 16 32 24
+    Z"/>
+
+  <!-- Highlight on the lower lip. -->
+  <path fill="#fff" opacity=".22" d="
+    M18 35
+    C24 39 28 41 32 41
+    C36 41 40 39 46 35
+    C40 41 36 43 32 43
+    C28 43 24 41 18 35
+    Z"/>
+</svg>

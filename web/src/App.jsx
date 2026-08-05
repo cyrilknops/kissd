@@ -6,12 +6,14 @@ import Overview from './pages/Overview';
 import Containers from './pages/Containers';
 import ContainerDetail from './pages/ContainerDetail';
 import Terminals from './pages/Terminals';
+import Compose from './pages/Compose';
 import Maintenance from './pages/Maintenance';
 import Settings from './pages/Settings';
 
 const NAV = [
   { to: '/', label: 'Overview', icon: '◎', end: true },
   { to: '/containers', label: 'Containers', icon: '▦' },
+  { to: '/compose', label: 'Compose', icon: '≡' },
   { to: '/terminal', label: 'Terminal', icon: '❯' },
   { to: '/maintenance', label: 'Maintenance', icon: '⛁' },
   { to: '/settings', label: 'Settings', icon: '⚙' },
@@ -96,6 +98,7 @@ export default function App() {
           {/* Rendered by the persistent block below, not here — routing to it
               must not unmount the open shells. */}
           <Route path="/terminal" element={null} />
+          <Route path="/compose" element={<Compose />} />
           <Route path="/maintenance" element={<Maintenance />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="*" element={<Navigate to="/" replace />} />

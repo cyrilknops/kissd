@@ -63,6 +63,7 @@ about how your host is arranged, and gets out of the way.
 | 🎛️ **Actions** | Start, stop, restart, and update via `docker compose pull && up -d`, resolved from each container's own compose labels |
 | 📈 **Host metrics** | CPU, load, memory, swap, network throughput, per-mount disk usage |
 | 🔔 **Alerts** | ntfy push when a container stops, goes unhealthy, or enters a restart loop — plus disk, memory and load thresholds |
+| 📝 **Compose** | View and edit the compose file behind any project, with validation, automatic backups and one-click apply |
 | 🧹 **Maintenance** | Disk usage breakdown and per-target pruning, with named volumes handled one at a time |
 | 💻 **Terminals** | A shell in any container, a root shell on the host, and Claude Code — all in the browser |
 
@@ -194,6 +195,23 @@ Reported figures are what a prune would **actually free**, which is not always
 what `docker system df` prints in its RECLAIMABLE column — that number counts
 total-minus-unused and can claim 75% reclaimable while most images are in
 active use.
+
+## 📝 Editing compose files
+
+The Compose page lists every project on the host and lets you edit the compose
+file behind it. Saving is deliberately careful:
+
+- Only files Docker itself reports as a project's compose file can be opened —
+  the allowlist is rebuilt from container labels on every request, so no path
+  outside it is reachable, `.env` files included.
+- The previous version is backed up into the kissd data volume, not your repo.
+- After writing, `docker compose config` validates the result. If it does not
+  parse, the file is **rolled back automatically** and the error is shown.
+- Saving checks the file's mtime, so an edit made elsewhere since you opened it
+  is refused rather than silently overwritten.
+
+**Save** writes to disk without touching anything running. **Save & apply**
+follows it with `docker compose up -d` and streams the output.
 
 ## 🔒 Security
 
