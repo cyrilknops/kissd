@@ -9,6 +9,17 @@ units, no package manager. Just a container talking to the Docker socket.
 
 ---
 
+## The name
+
+**K**eep **I**t **S**uper **S**imple **D**ashboard. Pronounced *kissed*.
+
+Which is also the design brief. It is a peck on the cheek, not a French kiss —
+kissd keeps its tongue well clear of your nginx config. It touches your host
+lightly, leaves nothing behind, and does not move in and rearrange the
+furniture.
+
+---
+
 ## Why
 
 Most self-hosted server panels want to *own* the machine. They install their own
