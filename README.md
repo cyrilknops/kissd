@@ -1,15 +1,24 @@
-# kissd
+<div align="center">
 
-**Keep It Super Simple Dashboard.** One container that gives you your whole
-Docker host in a browser: containers grouped by compose project, live host
-metrics, ntfy alerts, pruning, and terminals — including Claude Code.
+# 💋 kissd
 
-It installs **nothing on your host**. No nginx, no PHP, no certbot, no systemd
-units, no package manager. Just a container talking to the Docker socket.
+**Keep It Super Simple Dashboard**
+
+Your whole Docker host in a browser — containers, metrics, alerts, pruning and
+terminals — from **one container that installs nothing on your machine**.
+
+[![Licence](https://img.shields.io/github/license/cyrilknops/kissd?color=6f42c1)](LICENSE)
+[![Stars](https://img.shields.io/github/stars/cyrilknops/kissd?color=f5a623)](https://github.com/cyrilknops/kissd/stargazers)
+![Memory](https://img.shields.io/badge/RAM_at_rest-31_MB-2ecc71)
+![Host packages](https://img.shields.io/badge/host_packages_installed-0-4f8cff)
+![Node](https://img.shields.io/badge/node-22-339933?logo=node.js&logoColor=white)
+![React](https://img.shields.io/badge/react-18-61dafb?logo=react&logoColor=white)
+
+</div>
 
 ---
 
-## The name
+## 💋 The name
 
 **K**eep **I**t **S**uper **S**imple **D**ashboard. Pronounced *kissed*.
 
@@ -18,9 +27,7 @@ kissd keeps its tongue well clear of your nginx config. It touches your host
 lightly, leaves nothing behind, and does not move in and rearrange the
 furniture.
 
----
-
-## Why
+## 🤔 Why
 
 Most self-hosted server panels want to *own* the machine. They install their own
 nginx, take ports 80 and 443, manage your certificates, and run a package
@@ -28,26 +35,60 @@ manager behind your back. If you already have a reverse proxy — Nginx Proxy
 Manager, Traefik, Caddy — that is a fight you did not ask for.
 
 Worse, several of them only show you the containers *they* created. Point one at
-an existing host with twenty running services and you get an empty list.
+an existing host with twenty running services and you get a shrug and an empty
+list.
 
-kissd does the opposite. It shows what is already there, changes nothing about
-how your host is arranged, and gets out of the way.
+kissd does the opposite. It shows **what is already there**, changes nothing
+about how your host is arranged, and gets out of the way.
 
-## What you get
+## 📊 By the numbers
 
 | | |
 |---|---|
-| **Containers** | Every container on the host, as cards grouped by compose project, with live CPU, memory, health, ports and uptime |
-| **Detail page** | Per-container stats, mounts, networks, published ports, restart policy, failing healthcheck output, and live logs |
-| **Actions** | Start, stop, restart, and update via `docker compose pull && up -d`, resolved from each container's own compose labels |
-| **Host metrics** | CPU, load, memory, swap, network throughput, per-mount disk usage |
-| **Alerts** | ntfy push when a container stops, goes unhealthy, or enters a restart loop — plus disk, memory and load thresholds |
-| **Maintenance** | Disk usage breakdown and per-target pruning, with named volumes handled one at a time |
-| **Terminals** | A shell in any container, a root shell on the host, and Claude Code — all in the browser |
+| 🧠 **Memory at rest** | **31 MB** |
+| ⚡ **Cold start** | **1.4 s** |
+| 🏃 **22 containers listed in** | **0.16 s** |
+| 📦 **Image** | **469 MB** — or 1.02 GB with Claude Code bundled |
+| 📜 **Source** | **3,678 lines** (1,585 server · 2,093 web) |
+| 🔌 **Runtime dependencies** | **8** server · **5** web |
+| 🗄️ **Database** | **none** — settings are one JSON file |
+| 🩹 **Packages installed on your host** | **zero** |
 
-Everything is one screen deep. There is no wizard, no onboarding, no marketplace.
+## ✨ What you get
 
-## Install
+| | |
+|---|---|
+| 📦 **Containers** | Every container on the host, as cards grouped by compose project, with live CPU, memory, health, ports and uptime |
+| 🔍 **Detail page** | Per-container stats, mounts, networks, published ports, restart policy, failing healthcheck output, and live logs |
+| 🎛️ **Actions** | Start, stop, restart, and update via `docker compose pull && up -d`, resolved from each container's own compose labels |
+| 📈 **Host metrics** | CPU, load, memory, swap, network throughput, per-mount disk usage |
+| 🔔 **Alerts** | ntfy push when a container stops, goes unhealthy, or enters a restart loop — plus disk, memory and load thresholds |
+| 🧹 **Maintenance** | Disk usage breakdown and per-target pruning, with named volumes handled one at a time |
+| 💻 **Terminals** | A shell in any container, a root shell on the host, and Claude Code — all in the browser |
+
+Everything is one screen deep. No wizard, no onboarding, no marketplace, no
+telemetry.
+
+## 🏗️ How it works
+
+```mermaid
+flowchart LR
+    B["🌐 Browser"] -->|HTTPS + websockets| P["🔀 Your reverse proxy"]
+    P -->|http · no published ports| K["💋 kissd :8090"]
+
+    K -->|"/var/run/docker.sock"| D["🐳 Docker Engine"]
+    K -->|"/proc/1/* · pid: host"| H["🖥️ Host metrics"]
+    K -->|"nsenter into PID 1"| S["⌨️ Host shell"]
+    K -->|"docker compose pull && up -d"| C["📄 Your compose files"]
+    K -->|HTTP POST| N["🔔 ntfy"]
+
+    style K fill:#4f8cff,stroke:#2d5fb8,color:#fff
+```
+
+kissd publishes **no host ports**. Your proxy reaches it over a shared Docker
+network, so there is nothing on the host for it to collide with.
+
+## 🚀 Install
 
 You need Docker with the compose plugin, and a reverse proxy in front — kissd
 publishes no host ports and its session cookies are `Secure`, so it expects
@@ -62,8 +103,7 @@ cp .env.example .env
 Set a password and a session secret in `.env`:
 
 ```bash
-# a strong random secret
-openssl rand -hex 32
+openssl rand -hex 32    # use this for KISSD_JWT_SECRET
 ```
 
 Then bring it up:
@@ -72,26 +112,32 @@ Then bring it up:
 docker compose up -d --build
 ```
 
-Point your proxy at `kissd:8090` over the shared Docker network — or publish a
-port yourself if you prefer. **Websocket upgrades must be enabled**; the
+Point your proxy at `kissd:8090`. **Websocket upgrades must be enabled** — the
 terminals and log streaming will not work without them.
 
+> 💡 Don't want the bundled Claude Code CLI? Build with
+> `--build-arg WITH_CLAUDE=0` and the image drops from 1.02 GB to 469 MB.
+> Everything except the Claude tab works exactly the same.
+
 <details>
-<summary>Nginx Proxy Manager settings</summary>
+<summary>📋 Nginx Proxy Manager settings</summary>
+
+<br>
 
 | Field | Value |
 |---|---|
 | Scheme | `http` |
 | Forward hostname | `kissd` |
 | Forward port | `8090` |
-| Websockets Support | **on** |
+| Websockets Support | **on** ← required |
 | Force SSL | on |
 
 kissd joins an external network named `proxy-tier` by default. Change that in
 `docker-compose.yml` to whatever network your proxy is on.
+
 </details>
 
-## Configuration
+## ⚙️ Configuration
 
 `.env` holds only what is needed to boot:
 
@@ -106,14 +152,15 @@ Everything else — ntfy server, auth mode, alert toggles, thresholds, cooldown,
 hysteresis — lives in **Settings** and is stored in `data/settings.json`
 (mode 0600). Changes apply immediately, with no restart.
 
-ntfy credentials never travel back to the browser. The UI shows *set / not set*
-plus a four-character hint, and only overwrites a secret when you type a new one.
+🔐 ntfy credentials never travel back to the browser. The UI shows *set / not
+set* plus a four-character hint, and only overwrites a secret when you type a
+new one.
 
-## Alerts
+## 🔔 Alerts
 
-Threshold alerts use hysteresis and a cooldown, so a disk hovering at 85% sends
-one notification rather than one every 30 seconds, and only announces recovery
-once it has clearly dropped back.
+Threshold alerts use **hysteresis and a cooldown**, so a disk hovering at 85%
+sends one notification rather than one every 30 seconds, and only announces
+recovery once it has clearly dropped back.
 
 Container alerts fire on **state transitions**, so a container you stopped on
 purpose does not nag you. The first poll after a restart takes a silent
@@ -121,58 +168,90 @@ baseline.
 
 Restart loops are counted over a **rolling window** (default: 3 restarts within
 60 minutes). Comparing only against the previous poll would miss a slow loop — a
-container restarting every few minutes never shows a spike between two 30-second
-samples, yet it is still looping.
+container restarting every few minutes never shows a spike between two
+30-second samples, yet it is still looping.
 
-## Pruning
+## 🧹 Pruning
 
 The Maintenance page prunes dangling images, unused images, stopped containers,
 build cache and unused networks — each behind its own confirmation showing what
 will be freed.
 
-**There is deliberately no bulk volume prune.** Docker treats a named volume as
-"dangling" whenever its container merely isn't running, so `docker volume prune`
-happily destroys live data. kissd lists unused volumes by name, size and compose
-project, and deletes them one at a time — each requiring your password *and* the
-volume name typed out. The refcount is re-checked at the moment of deletion, so
-a volume that got attached in the meantime is refused.
+> ⚠️ **There is deliberately no bulk volume prune.** Docker treats a named
+> volume as "dangling" whenever its container merely isn't running, so
+> `docker volume prune` happily destroys live data. On the host this was built
+> for, it would have taken out a 210 MB MongoDB volume whose container simply
+> wasn't running that day.
+
+kissd instead lists unused volumes by name, size and compose project, and
+deletes them one at a time — each requiring your password *and* the volume name
+typed out. The refcount is re-checked at the moment of deletion, so a volume
+that got attached in the meantime is refused.
 
 Reported figures are what a prune would **actually free**, which is not always
 what `docker system df` prints in its RECLAIMABLE column — that number counts
 total-minus-unused and can claim 75% reclaimable while most images are in
 active use.
 
-## Security
+## 🔒 Security
 
 kissd holds the Docker socket and can open a root shell on the host. **It is
 root-equivalent access to your server.** That is the point of the tool, but be
 deliberate about it:
 
-- Put it behind HTTPS and treat the login as a root password.
-- Consider an IP allowlist or basic auth at the proxy, in front of kissd.
-- The host shell is gated behind re-entering your password, which mints a
+- 🔑 Put it behind HTTPS and treat the login as a root password.
+- 🚧 Consider an IP allowlist or basic auth at the proxy, *in front of* kissd.
+- ⏱️ The host shell is gated behind re-entering your password, which mints a
   separate token valid for five minutes. That slows an attacker down; it does
   not stop one who has your password.
-- Login is rate-limited to five attempts per fifteen minutes.
+- 🐢 Login is rate-limited to five attempts per fifteen minutes.
 
 The container runs `privileged` with `pid: host`. Both are required: `pid: host`
 so host metrics come from the host's namespaces (`/proc/1/net/dev`,
 `/proc/1/mounts`) rather than the container's, and `privileged` so `nsenter` can
-reach PID 1 for the host shell. If you do not want a host shell, drop both and
+reach PID 1 for the host shell. **If you do not want a host shell, drop both** —
 everything except that one feature keeps working.
 
-## Claude Code
+## 🤖 Claude Code
 
-The **Claude** terminal tab runs Claude Code inside the container, with `$HOME`
-on the `data/` volume so your login survives restarts. Sign in once via the
-browser terminal and it stays signed in.
+The **Claude** terminal tab runs [Claude Code](https://claude.com/claude-code)
+inside the container, with `$HOME` on the `data/` volume so your login survives
+restarts. Sign in once via the browser terminal and it stays signed in.
 
-## Built with
+Ask it to explain why a container keeps restarting, and it can read the logs
+itself.
 
-Node 22, Express, dockerode and node-pty on the back. React 18, Vite and xterm.js
-on the front. No database — settings are a JSON file. The whole thing is one
-multi-stage `Dockerfile`.
+## 🛠️ Built with
 
-## Licence
+**Back:** Node 22 · Express · dockerode · node-pty · ws
+**Front:** React 18 · Vite · xterm.js · react-router
+**Storage:** a JSON file. That's it.
+
+The whole thing is one multi-stage `Dockerfile`.
+
+## 🤝 Contributing
+
+Issues and pull requests welcome. The bar for a new feature is simple: **does it
+survive the name?** If it needs a wizard, a plugin system, or a second database,
+it probably belongs somewhere else.
+
+```bash
+# backend — needs the Docker socket and the two required env vars
+cd server && npm install
+KISSD_ADMIN_PASSWORD=dev KISSD_JWT_SECRET=dev DATA_DIR=./data node src/index.js
+
+# frontend — Vite proxies /api and /ws to :8090
+cd web && npm install && npm run dev
+```
+
+Host metrics and the host shell only work inside the container, since they read
+`/proc/1/*` and `nsenter` into PID 1.
+
+## 📄 Licence
 
 [GPL-3.0](LICENSE)
+
+<div align="center">
+<br>
+<sub>Built for a VPS that already had a reverse proxy and no patience for another one.</sub>
+</div>

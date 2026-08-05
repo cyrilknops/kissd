@@ -30,7 +30,11 @@ RUN apk add --no-cache \
 
 # Claude Code, for the "Claude" terminal tab. OAuth login persists in
 # $HOME (/data/home), which is on the ./data volume.
-RUN npm install -g @anthropic-ai/claude-code
+# It is ~270MB of the image, so build with --build-arg WITH_CLAUDE=0 to omit it
+# (the Claude tab then just reports that the CLI is missing; nothing else
+# changes).
+ARG WITH_CLAUDE=1
+RUN if [ "$WITH_CLAUDE" = "1" ]; then npm install -g @anthropic-ai/claude-code; fi
 
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
