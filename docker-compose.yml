@@ -1,0 +1,61 @@
+networks:
+  proxy-tier:
+    external: true
+
+services:
+  kissd:
+    build: .
+    image: kissd:latest
+    container_name: kissd
+    restart: unless-stopped
+    # Required for the host shell (nsenter into PID 1's namespaces) and for
+    # reading the host's real mount table via /proc/1/mounts.
+    privileged: true
+    pid: host
+    environment:
+      PORT: 8090
+      DATA_DIR: /data
+      HOME: /data/home
+      # pid:host means tini isn't PID 1, so it must register as a subreaper
+      # explicitly for zombie reaping to work.
+      TINI_SUBREAPER: "1"
+      # Lets the panel recognise itself, so updating it detaches to the host
+      # instead of killing the request mid-flight.
+      SELF_NAME: kissd
+      # Admin login. Password is hashed at boot; it is never stored on disk.
+      KISSD_ADMIN_USER: ${KISSD_ADMIN_USER:-admin}
+      KISSD_ADMIN_PASSWORD: ${KISSD_ADMIN_PASSWORD}
+      # Signs session cookies. Change it and every session is invalidated.
+      KISSD_JWT_SECRET: ${KISSD_JWT_SECRET}
+      # First-run bootstrap only — after that, edit ntfy in Settings.
+      NTFY_URL: ${NTFY_URL:-}
+      NTFY_TOPIC: ${NTFY_TOPIC:-}
+      NTFY_TOKEN: ${NTFY_TOKEN:-}
+      REPO_DIR: ${REPO_DIR:-/srv/docker}
+      HOSTNAME_FQDN: ${HOSTNAME_FQDN:-docker-host}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Mounted at the SAME path as on the host so that the relative bind
+      # mounts inside each service's docker-compose.yml resolve identically
+      # when the panel shells out to `docker compose`.
+      - ${REPO_DIR:-/srv/docker}:${REPO_DIR:-/srv/docker}
+      # Read-only view of the host filesystem, for disk usage reporting.
+      - /:/host/root:ro
+      # Settings, alert state, and the persisted Claude OAuth login.
+      - ./data:/data
+    networks:
+      proxy-tier:
+        aliases:
+          # Legacy name, so a reverse-proxy entry created before the container
+          # was called kissd keeps resolving. Drop it once your proxy forwards
+          # to "kissd".
+          - dashboard
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          node -e "const s=require('net').connect(8090,'127.0.0.1',()=>{s.end();process.exit(0)});s.on('error',()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
