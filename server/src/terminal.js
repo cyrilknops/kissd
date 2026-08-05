@@ -8,6 +8,7 @@
 import pty from 'node-pty';
 import { docker } from './docker.js';
 import { REPO_DIR } from './config.js';
+import { BIN_DIR, pathWithClaude } from './claude.js';
 
 function safeSend(ws, data) {
   if (ws.readyState === 1) ws.send(data);
@@ -102,11 +103,19 @@ function hostShell(ws) {
 }
 
 // Claude Code runs inside this container, where $HOME is on the ./data volume,
-// so the OAuth login survives restarts.
+// so both the CLI itself and the OAuth login survive restarts.
 function claudeShell(ws) {
-  spawnPty(ws, 'bash', ['-lc', 'claude || (echo; echo "claude exited — press enter for a shell"; read _; exec bash -l)'], {
+  // `bash -l` sources /etc/profile, which overwrites any PATH passed through
+  // the environment — so the on-demand install directory has to be prepended
+  // again *inside* the shell, after the profile has run.
+  const script = [
+    `export PATH=${JSON.stringify(BIN_DIR)}:"$PATH"`,
+    'claude || (echo; echo "claude exited — press enter for a shell"; read _; exec bash -l)',
+  ].join('; ');
+
+  spawnPty(ws, 'bash', ['-lc', script], {
     cwd: REPO_DIR,
-    env: { ...process.env, TERM: 'xterm-256color' },
+    env: { ...process.env, TERM: 'xterm-256color', PATH: pathWithClaude() },
   });
 }
 

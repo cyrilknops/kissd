@@ -28,12 +28,11 @@ RUN apk add --no-cache \
       curl \
       ripgrep
 
-# Claude Code, for the "Claude" terminal tab. OAuth login persists in
-# $HOME (/data/home), which is on the ./data volume.
-# It is ~270MB of the image, so build with --build-arg WITH_CLAUDE=0 to omit it
-# (the Claude tab then just reports that the CLI is missing; nothing else
-# changes).
-ARG WITH_CLAUDE=1
+# Claude Code is NOT bundled: it is ~270MB, and the panel installs it on demand
+# into the data volume instead, where it survives rebuilds. Set
+# --build-arg WITH_CLAUDE=1 to bake it into the image anyway (useful for hosts
+# with no outbound npm access at runtime).
+ARG WITH_CLAUDE=0
 RUN if [ "$WITH_CLAUDE" = "1" ]; then npm install -g @anthropic-ai/claude-code; fi
 
 WORKDIR /app

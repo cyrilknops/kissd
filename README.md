@@ -64,7 +64,7 @@ about how your host is arranged, and gets out of the way.
 | 📈 **Host metrics** | CPU, load, memory, swap, network throughput, per-mount disk usage |
 | 🔔 **Alerts** | ntfy push when a container stops, goes unhealthy, or enters a restart loop — plus disk, memory and load thresholds |
 | 🧹 **Maintenance** | Disk usage breakdown and per-target pruning, with named volumes handled one at a time |
-| 💻 **Terminals** | A shell in any container, and a root shell on the host — both in the browser |
+| 💻 **Terminals** | A shell in any container, a root shell on the host, and Claude Code — all in the browser |
 
 Everything is one screen deep. No wizard, no onboarding, no marketplace, no
 telemetry.
@@ -114,6 +114,12 @@ docker compose up -d --build
 
 Point your proxy at `kissd:8090`. **Websocket upgrades must be enabled** — the
 terminals and log streaming will not work without them.
+
+> 💡 Claude Code is **not** in the image — it is ~270 MB and would be pulled on
+> every update. Install it with a button from the Terminal page instead; it
+> lands in the `data/` volume and survives rebuilds. If your host has no
+> outbound npm access at runtime, bake it in with
+> `--build-arg WITH_CLAUDE=1`.
 
 <details>
 <summary>📋 Nginx Proxy Manager settings</summary>
@@ -207,6 +213,20 @@ so host metrics come from the host's namespaces (`/proc/1/net/dev`,
 `/proc/1/mounts`) rather than the container's, and `privileged` so `nsenter` can
 reach PID 1 for the host shell. **If you do not want a host shell, drop both** —
 everything except that one feature keeps working.
+
+## 🤖 Claude Code
+
+The **Claude** terminal tab runs [Claude Code](https://claude.com/claude-code)
+right in the browser. Ask it why a container keeps restarting and it can read
+the logs itself.
+
+It is **not bundled** in the image. Hit **Install Claude Code** on the Terminal
+page and it is fetched on demand — about six seconds — into
+`data/npm-global/`. Because that is the mounted volume and not the image
+layer, it survives `docker compose up --build`, container recreation and image
+pulls. The same button updates it later.
+
+Your sign-in persists in `data/home/`, so you authenticate once.
 
 ## 🛠️ Built with
 

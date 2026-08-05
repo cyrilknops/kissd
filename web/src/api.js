@@ -36,6 +36,9 @@ export const api = {
   prune: (target) => req('POST', `/api/system/prune/${target}`),
   removeVolume: (name) => req('POST', '/api/system/volumes/remove', { name }),
 
+  claude: () => req('GET', '/api/claude'),
+  uninstallClaude: () => req('POST', '/api/claude/uninstall'),
+
   settings: () => req('GET', '/api/settings'),
   saveSettings: (patch) => req('PUT', '/api/settings', patch),
   testNtfy: (ntfy) => req('POST', '/api/settings/ntfy/test', { ntfy }),
@@ -51,6 +54,22 @@ export async function streamUpdate(id, onChunk) {
   if (!res.ok && res.headers.get('content-type')?.includes('application/json')) {
     const data = await res.json().catch(() => ({}));
     throw new Error(data.error || `Update failed (${res.status})`);
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    onChunk(decoder.decode(value, { stream: true }));
+  }
+}
+
+// Same streaming shape as the container update: plain text, as it happens.
+export async function streamPost(url, onChunk) {
+  const res = await fetch(url, { method: 'POST', credentials: 'same-origin' });
+  if (!res.ok && res.headers.get('content-type')?.includes('application/json')) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || `Request failed (${res.status})`);
   }
   const reader = res.body.getReader();
   const decoder = new TextDecoder();

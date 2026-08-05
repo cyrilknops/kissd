@@ -1,9 +1,76 @@
-import { useEffect, useState } from 'react';
-import { api } from '../api';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { api, streamPost } from '../api';
 import XTerm from '../components/Terminal';
 import Modal from '../components/Modal';
 
 let seq = 0;
+
+// Claude Code isn't bundled in the image — it installs on demand into the data
+// volume, so it survives rebuilds without adding ~270MB to every pull.
+function ClaudeInstaller({ status, onClose, onInstalled }) {
+  const [log, setLog] = useState('');
+  const [running, setRunning] = useState(false);
+  const [done, setDone] = useState(false);
+  const preRef = useRef(null);
+
+  useEffect(() => {
+    if (preRef.current) preRef.current.scrollTop = preRef.current.scrollHeight;
+  }, [log]);
+
+  async function go() {
+    setRunning(true);
+    setLog('');
+    try {
+      await streamPost('/api/claude/install', (chunk) => setLog((t) => t + chunk));
+    } catch (err) {
+      setLog((t) => `${t}\n${err.message}\n`);
+    } finally {
+      setRunning(false);
+      setDone(true);
+      onInstalled();
+    }
+  }
+
+  return (
+    <Modal
+      title={status.installed ? 'Update Claude Code' : 'Install Claude Code'}
+      onClose={running ? () => {} : onClose}
+      flush={Boolean(log)}
+      footer={
+        <>
+          <button className="btn" onClick={onClose} disabled={running}>
+            {done ? 'Close' : 'Cancel'}
+          </button>
+          {!done && (
+            <button className="btn primary" onClick={go} disabled={running}>
+              {running ? 'Installing…' : status.installed ? 'Update' : 'Install'}
+            </button>
+          )}
+        </>
+      }
+    >
+      {log ? (
+        <pre className="stream" ref={preRef} style={{ maxHeight: '46vh' }}>{log}</pre>
+      ) : (
+        <div style={{ padding: 0 }}>
+          <p style={{ marginTop: 0 }}>
+            Claude Code is downloaded on demand rather than bundled into the image — it
+            is around 270&nbsp;MB, which most people would rather not pull with every
+            update.
+          </p>
+          <p className="dim">
+            It installs into the <code className="mono">data/</code> volume, so it stays
+            put across restarts, rebuilds and container recreation. Your sign-in persists
+            there too.
+          </p>
+          {status.installed && status.version && (
+            <p className="dim">Currently installed: <strong>{status.version}</strong></p>
+          )}
+        </div>
+      )}
+    </Modal>
+  );
+}
 
 function ElevatePrompt({ onClose, onSuccess }) {
   const [password, setPassword] = useState('');
@@ -53,6 +120,18 @@ export default function Terminals({ containers, pendingShell, clearPendingShell 
   const [active, setActive] = useState(null);
   const [elevating, setElevating] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [claude, setClaude] = useState(null);
+  const [installerOpen, setInstallerOpen] = useState(false);
+
+  const loadClaude = useCallback(async () => {
+    try {
+      setClaude(await api.claude());
+    } catch {
+      setClaude({ installed: false, installing: false, managed: true, version: null });
+    }
+  }, []);
+
+  useEffect(() => { loadClaude(); }, [loadClaude]);
 
   function addSession(session) {
     const key = `t${seq++}`;
@@ -87,11 +166,33 @@ export default function Terminals({ containers, pendingShell, clearPendingShell 
         <div className="btn-row">
           <button className="btn" onClick={() => setPickerOpen(true)}>Container shell</button>
           <button className="btn" onClick={() => setElevating(true)}>Host shell</button>
-          <button className="btn primary" onClick={() => addSession({ label: 'Claude', params: { type: 'claude' } })}>
-            Claude
-          </button>
+          {claude?.installed ? (
+            <>
+              <button className="btn primary" onClick={() => addSession({ label: 'Claude', params: { type: 'claude' } })}>
+                Claude
+              </button>
+              {claude.managed && (
+                <button className="btn sm" title={`Installed: ${claude.version || 'unknown'}`}
+                        onClick={() => setInstallerOpen(true)}>
+                  ⟳
+                </button>
+              )}
+            </>
+          ) : (
+            <button className="btn" onClick={() => setInstallerOpen(true)} disabled={!claude}>
+              {claude ? 'Install Claude Code' : 'Checking…'}
+            </button>
+          )}
         </div>
       </div>
+
+      {claude && !claude.installed && (
+        <div className="notice warn">
+          Claude Code isn't installed yet. It is not bundled in the image — click
+          <strong> Install Claude Code</strong> to fetch it into the data volume, where it
+          survives rebuilds.
+        </div>
+      )}
 
       {sessions.length > 0 && (
         <div className="term-tabs">
@@ -139,6 +240,14 @@ export default function Terminals({ containers, pendingShell, clearPendingShell 
             setElevating(false);
             addSession({ label: 'host (root)', params: { type: 'host' } });
           }}
+        />
+      )}
+
+      {installerOpen && claude && (
+        <ClaudeInstaller
+          status={claude}
+          onClose={() => setInstallerOpen(false)}
+          onInstalled={loadClaude}
         />
       )}
 

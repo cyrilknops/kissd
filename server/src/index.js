@@ -11,6 +11,7 @@ import * as dockerApi from './docker.js';
 import * as host from './host.js';
 import * as alerts from './alerts.js';
 import * as system from './system.js';
+import * as claude from './claude.js';
 import { send as ntfySend } from './ntfy.js';
 import { handleTerminal, handleLogs } from './terminal.js';
 
@@ -176,6 +177,37 @@ app.post('/api/system/volumes/remove', auth.requireElevated, async (req, res) =>
     return res.json(await system.removeVolume(name));
   } catch (err) {
     return res.status(400).json({ error: err.message });
+  }
+});
+
+// --- claude code (installed on demand into the data volume) ----------------
+
+app.get('/api/claude', auth.requireAuth, async (req, res) => {
+  try {
+    res.json(await claude.status());
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/claude/install', auth.requireAuth, async (req, res) => {
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('X-Accel-Buffering', 'no');
+  try {
+    const result = await claude.install((chunk) => res.write(chunk));
+    res.write(result.ok ? '\nDone.\n' : '\nInstall failed.\n');
+  } catch (err) {
+    res.write(`\nError: ${err.message}\n`);
+  }
+  res.end();
+});
+
+app.post('/api/claude/uninstall', auth.requireAuth, async (req, res) => {
+  try {
+    res.json(await claude.uninstall());
+  } catch (err) {
+    res.status(400).json({ error: err.message });
   }
 });
 
