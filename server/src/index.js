@@ -96,19 +96,9 @@ app.get('/api/containers/:id', auth.requireAuth, async (req, res) => {
   }
 });
 
-app.post('/api/containers/:id/:action', auth.requireAuth, async (req, res) => {
-  const { id, action } = req.params;
-  if (!['start', 'stop', 'restart'].includes(action)) {
-    return res.status(400).json({ error: 'Unsupported action' });
-  }
-  try {
-    await dockerApi.action(id, action);
-    return res.json({ ok: true });
-  } catch (err) {
-    return res.status(500).json({ error: err.message });
-  }
-});
-
+// Declared before the generic /:action route below — Express matches in
+// definition order, so the catch-all would otherwise swallow "update" and
+// answer "Unsupported action".
 // Streams compose output back as it happens (chunked text/plain).
 app.post('/api/containers/:id/update', auth.requireAuth, async (req, res) => {
   try {
@@ -142,6 +132,19 @@ app.post('/api/containers/:id/update', auth.requireAuth, async (req, res) => {
       res.write(`\nError: ${err.message}\n`);
       return res.end();
     }
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/containers/:id/:action', auth.requireAuth, async (req, res) => {
+  const { id, action } = req.params;
+  if (!['start', 'stop', 'restart'].includes(action)) {
+    return res.status(400).json({ error: `Unsupported action: ${action}` });
+  }
+  try {
+    await dockerApi.action(id, action);
+    return res.json({ ok: true });
+  } catch (err) {
     return res.status(500).json({ error: err.message });
   }
 });
@@ -218,6 +221,21 @@ app.post('/api/compose/apply', auth.requireAuth, async (req, res) => {
   try {
     const code = await compose.apply(String(project || ''), (chunk) => res.write(chunk));
     res.write(code === 0 ? '\nApplied.\n' : `\nFailed (exit ${code}).\n`);
+  } catch (err) {
+    res.write(`\nError: ${err.message}\n`);
+  }
+  res.end();
+});
+
+// Pull + recreate every service in a project, streamed like a single update.
+app.post('/api/compose/update', auth.requireAuth, async (req, res) => {
+  const { project } = req.body || {};
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('X-Accel-Buffering', 'no');
+  try {
+    const code = await compose.update(String(project || ''), (chunk) => res.write(chunk));
+    res.write(code === 0 ? '\nUpdate complete.\n' : `\nUpdate failed (exit ${code}).\n`);
   } catch (err) {
     res.write(`\nError: ${err.message}\n`);
   }

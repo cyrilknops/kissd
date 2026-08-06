@@ -67,6 +67,7 @@ export default function App() {
           <span>
             kissd
             <small>keep it super simple</small>
+            <small className="version">v{__APP_VERSION__}</small>
           </span>
         </div>
 
