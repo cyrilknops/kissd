@@ -20,6 +20,7 @@ export default function Settings() {
   const [status, setStatus] = useState(null);
   const [busy, setBusy] = useState(false);
   const [alertLog, setAlertLog] = useState([]);
+  const [logins, setLogins] = useState(null);
 
   useEffect(() => {
     api.settings().then(setS).catch((e) => setStatus({ type: 'err', text: e.message }));
@@ -30,10 +31,21 @@ export default function Settings() {
 
   const ntfy = s.ntfy;
   const alerts = s.alerts;
+  const registries = s.registries || [];
 
   const patch = (section, changes) => setS({ ...s, [section]: { ...s[section], ...changes } });
   const patchNested = (section, key, changes) =>
     setS({ ...s, [section]: { ...s[section], [key]: { ...s[section][key], ...changes } } });
+
+  const patchRegistry = (i, changes) => setS({
+    ...s,
+    registries: registries.map((r, n) => (n === i ? { ...r, ...changes } : r)),
+  });
+  const addRegistry = () => setS({
+    ...s,
+    registries: [...registries, { server: '', username: '', password: '', passwordSet: false }],
+  });
+  const removeRegistry = (i) => setS({ ...s, registries: registries.filter((_, n) => n !== i) });
 
   // Secrets are only transmitted when the user actually typed a new value.
   function buildPatch() {
@@ -42,6 +54,8 @@ export default function Settings() {
     delete out.ntfy.tokenHint;
     delete out.ntfy.passwordSet;
     delete out.ntfy.passwordHint;
+    out.registries = (out.registries || []).map(({ server, username, password }) =>
+      ({ server, username, password }));
     return out;
   }
 
@@ -72,7 +86,22 @@ export default function Settings() {
     }
   }
 
+  async function testLogins() {
+    setBusy(true);
+    setStatus(null);
+    setLogins(null);
+    try {
+      const { results } = await api.testRegistries(buildPatch().registries);
+      setLogins(results);
+    } catch (err) {
+      setStatus({ type: 'err', text: `Test failed: ${err.message}` });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const configured = ntfy.url && ntfy.topic;
+  const testable = registries.some((r) => r.server && r.username && (r.password || r.passwordSet));
 
   return (
     <>
@@ -242,6 +271,78 @@ export default function Settings() {
           <Num label="Load threshold" value={alerts.load.threshold} min={0} step={0.5}
                onChange={(v) => patchNested('alerts', 'load', { threshold: v })} />
         </div>
+      </div>
+
+      <div className="card" style={{ marginTop: 16 }}>
+        <h3>Container registries</h3>
+        <p className="hint" style={{ marginTop: -4, marginBottom: 14 }}>
+          Docker keeps registry logins per client, so a <code>docker login</code> run over SSH is
+          invisible to the panel — a private image pulls fine from a host shell and fails here with
+          “no basic auth credentials”. Credentials added below are written to a config that every
+          docker the panel runs points at, so one login covers container updates, project updates
+          and compose apply alike.
+        </p>
+
+        {registries.map((r, i) => (
+          <div key={i} className="registry-row">
+            <div className="field">
+              <label>Registry</label>
+              <input type="text" placeholder="registry.example.com" value={r.server}
+                     onChange={(e) => patchRegistry(i, { server: e.target.value })} />
+              <div className="hint">Host only — no https:// and no image path.</div>
+            </div>
+            <div className="field">
+              <label>Username</label>
+              <input type="text" value={r.username}
+                     onChange={(e) => patchRegistry(i, { username: e.target.value })} />
+            </div>
+            <div className="field">
+              <label>Password</label>
+              <input type="password" value={r.password}
+                     placeholder={r.passwordSet ? `saved (${r.passwordHint})` : 'password or access token'}
+                     onChange={(e) => patchRegistry(i, { password: e.target.value })} />
+              {r.passwordSet && (
+                <div className="hint">
+                  Leave blank to keep it, type to replace it ·{' '}
+                  <a href="#clear" onClick={(e) => { e.preventDefault(); patchRegistry(i, { password: '__CLEAR__' }); }}>Clear</a>
+                </div>
+              )}
+            </div>
+            <button className="btn xs danger" onClick={() => removeRegistry(i)}>Remove</button>
+          </div>
+        ))}
+
+        {!registries.length && (
+          <p className="dim" style={{ margin: '0 0 14px' }}>
+            None configured. Public images pull without any of this.
+          </p>
+        )}
+
+        <div className="btn-row" style={{ alignItems: 'center' }}>
+          <button className="btn" onClick={addRegistry}>Add registry</button>
+          <button className="btn" onClick={testLogins} disabled={busy || !testable}>
+            {busy ? 'Checking…' : 'Test logins'}
+          </button>
+          {!testable && registries.length > 0 && (
+            <span className="dim" style={{ fontSize: 12 }}>Each row needs a server, username and password.</span>
+          )}
+        </div>
+
+        {logins && (
+          <div style={{ marginTop: 12 }}>
+            {logins.map((l) => (
+              <div key={l.server} className="hint" style={{ marginTop: 4 }}>
+                {l.ok ? '✓' : '✗'} <strong>{l.server}</strong>
+                {l.ok ? ' — signed in' : ` — ${l.error}`}
+              </div>
+            ))}
+          </div>
+        )}
+
+        <p className="hint" style={{ marginTop: 14 }}>
+          Passwords are stored server-side in a 0600 file on the data volume and never sent back to
+          the browser. Save changes to apply them; a removed registry loses its credential too.
+        </p>
       </div>
 
       <div className="card" style={{ marginTop: 16 }}>

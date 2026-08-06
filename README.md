@@ -63,6 +63,7 @@ about how your host is arranged, and gets out of the way.
 | 🎛️ **Actions** | Start, stop, restart, and update via `docker compose pull && up -d`, resolved from each container's own compose labels — one service, or a whole project at once from its group header |
 | 📈 **Host metrics** | CPU, load, memory, swap, network throughput, per-mount disk usage |
 | 🔔 **Alerts** | ntfy push when a container stops, goes unhealthy, or enters a restart loop — plus disk, memory and load thresholds |
+| 🔑 **Registries** | Private registry logins in Settings, applied to every `docker` the panel runs — no `docker login` on the host |
 | 📝 **Compose** | View and edit the compose file behind any project, with validation, automatic backups and one-click apply |
 | 🧹 **Maintenance** | Disk usage breakdown and per-target pruning, with named volumes handled one at a time |
 | 💻 **Terminals** | A shell in any container, a root shell on the host, and Claude Code — all in the browser |
@@ -151,13 +152,33 @@ kissd joins an external network named `proxy-tier` by default. Change that in
 | `REPO_DIR` | Where your compose files live. Bind-mounted at the *same* path inside the container so `docker compose` resolves relative binds correctly. |
 | `NTFY_URL` / `NTFY_TOPIC` / `NTFY_TOKEN` | Optional first-run seed for notifications. |
 
-Everything else — ntfy server, auth mode, alert toggles, thresholds, cooldown,
-hysteresis — lives in **Settings** and is stored in `data/settings.json`
-(mode 0600). Changes apply immediately, with no restart.
+Everything else — ntfy server, auth mode, registry logins, alert toggles,
+thresholds, cooldown, hysteresis — lives in **Settings** and is stored in
+`data/settings.json` (mode 0600). Changes apply immediately, with no restart.
 
-🔐 ntfy credentials never travel back to the browser. The UI shows *set / not
-set* plus a four-character hint, and only overwrites a secret when you type a
-new one.
+🔐 ntfy and registry credentials never travel back to the browser. The UI shows
+*set / not set* plus a four-character hint, and only overwrites a secret when
+you type a new one.
+
+### 🔑 Private registries
+
+Docker keeps registry logins **per client**, not in the daemon: `docker login`
+writes them to the calling user's config, and the CLI attaches them to each
+pull. So a login done over SSH is invisible to kissd, and a private image that
+pulls fine from a host shell fails in the panel with:
+
+```
+pull access denied, repository does not exist or may require authorization:
+authorization failed: no basic auth credentials
+```
+
+Add the registry under **Settings › Container registries** instead. Credentials
+are written to `data/docker/config.json` (mode 0600), which every `docker` the
+panel runs points at via `DOCKER_CONFIG` — so one login covers container
+updates, project updates and compose apply alike, including the detached
+self-update that runs in the host's namespaces. **Test logins** verifies each
+one against the real registry before you rely on it, and removing a registry
+removes its credential rather than orphaning it.
 
 ## 🔔 Alerts
 

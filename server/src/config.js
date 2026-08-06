@@ -16,6 +16,9 @@ export const DEFAULTS = {
     username: '',
     password: '',
   },
+  // Private registry logins, applied to every `docker` the panel runs.
+  // Each entry is { server, username, password }; see registry.js.
+  registries: [],
   alerts: {
     enabled: true,
     pollSeconds: 30,
@@ -94,6 +97,10 @@ export function save(settings) {
   return cache;
 }
 
+function hint(value) {
+  return value ? `••••${value.slice(-4)}` : '';
+}
+
 // Secrets never travel back to the browser. The UI gets a "set / not set"
 // flag plus a short hint so you can tell one token from another.
 export function redact(settings) {
@@ -102,7 +109,37 @@ export function redact(settings) {
     const value = settings[section]?.[field] || '';
     out[section][field] = '';
     out[section][`${field}Set`] = Boolean(value);
-    out[section][`${field}Hint`] = value ? `••••${value.slice(-4)}` : '';
+    out[section][`${field}Hint`] = hint(value);
+  }
+  out.registries = (settings.registries || []).map((r) => ({
+    server: r.server || '',
+    username: r.username || '',
+    password: '',
+    passwordSet: Boolean(r.password),
+    passwordHint: hint(r.password || ''),
+  }));
+  return out;
+}
+
+// The UI always sends the whole list, so the stored passwords are re-matched by
+// server name: an entry that comes back with a blank password keeps the one on
+// disk, exactly like the single-secret fields above. Blank and duplicate server
+// names are dropped rather than saved as unusable rows.
+function mergeRegistries(current, incoming) {
+  if (!Array.isArray(incoming)) return current || [];
+  const stored = new Map((current || []).map((r) => [r.server, r]));
+  const seen = new Set();
+  const out = [];
+  for (const raw of incoming) {
+    const server = String(raw?.server || '').trim();
+    if (!server || seen.has(server)) continue;
+    seen.add(server);
+    const sent = raw?.password;
+    let password;
+    if (sent === '__CLEAR__') password = '';
+    else if (sent) password = String(sent);
+    else password = stored.get(server)?.password || '';
+    out.push({ server, username: String(raw?.username || '').trim(), password });
   }
   return out;
 }
@@ -119,7 +156,14 @@ export function applyPatch(patch) {
     delete merged[section][`${field}Set`];
     delete merged[section][`${field}Hint`];
   }
+  merged.registries = mergeRegistries(current.registries, patch?.registries ?? current.registries);
   return save(merged);
+}
+
+// Fills in the saved password for entries the UI sent blank, so "Test" can
+// check a stored credential the browser never receives.
+export function withStoredPasswords(incoming) {
+  return mergeRegistries(load().registries, incoming);
 }
 
 export const REPO_DIR = process.env.REPO_DIR || '/srv/docker';

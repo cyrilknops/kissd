@@ -49,6 +49,7 @@ export const api = {
   settings: () => req('GET', '/api/settings'),
   saveSettings: (patch) => req('PUT', '/api/settings', patch),
   testNtfy: (ntfy) => req('POST', '/api/settings/ntfy/test', { ntfy }),
+  testRegistries: (registries) => req('POST', '/api/settings/registries/test', { registries }),
   alerts: () => req('GET', '/api/alerts'),
 };
 

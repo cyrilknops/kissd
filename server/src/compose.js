@@ -7,6 +7,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { docker, composeInfo, updateSelfDetached, SELF_NAME } from './docker.js';
+import * as registry from './registry.js';
 
 const DATA_DIR = process.env.DATA_DIR || '/data';
 const BACKUP_DIR = path.join(DATA_DIR, 'compose-backups');
@@ -82,7 +83,7 @@ export async function read(filePath) {
 function runCompose(args, cwd) {
   return new Promise((resolve) => {
     let out = '';
-    const child = spawn('docker', args, { cwd });
+    const child = spawn('docker', args, { cwd, env: registry.env() });
     child.stdout.on('data', (d) => { out += d.toString(); });
     child.stderr.on('data', (d) => { out += d.toString(); });
     child.on('error', (err) => resolve({ code: 1, out: err.message }));
@@ -164,7 +165,7 @@ function streamSteps(project, steps, onData) {
       if (idx >= steps.length) return resolve(0);
       const args = steps[idx];
       onData(`$ docker ${args.join(' ')}\n\n`);
-      const child = spawn('docker', args, { cwd: project.workdir });
+      const child = spawn('docker', args, { cwd: project.workdir, env: registry.env() });
       child.stdout.on('data', (d) => onData(d.toString()));
       child.stderr.on('data', (d) => onData(d.toString()));
       child.on('error', (err) => { onData(`\nfailed to run docker: ${err.message}\n`); resolve(1); });
@@ -183,6 +184,10 @@ export async function apply(projectName, onData) {
   return streamSteps(project, [composeArgs(project, 'up', ['-d'])], onData);
 }
 
+// Returned instead of an exit code when the run was handed to the host. There
+// is no status to wait for, so the caller must not claim the update finished.
+export const DETACHED = 'detached';
+
 // Pulls every image in the project, then recreates the services whose image
 // actually changed. --ignore-pull-failures keeps a locally-built service (one
 // with no image to pull) from aborting the update for everything else.
@@ -193,8 +198,8 @@ export async function update(projectName, onData) {
     onData(`This project runs kissd itself (${SELF_NAME}).\n`);
     onData('Handing the compose run to the host so it survives this container being replaced.\n');
     onData('The panel will drop out for a few seconds — reload once it returns.\n');
-    updateSelfDetached(project);
-    return 0;
+    await updateSelfDetached(project);
+    return DETACHED;
   }
 
   return streamSteps(project, [
