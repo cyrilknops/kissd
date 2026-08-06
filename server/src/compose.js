@@ -6,7 +6,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { docker, composeInfo } from './docker.js';
+import { docker, composeInfo, updateSelfDetached, SELF_NAME } from './docker.js';
 
 const DATA_DIR = process.env.DATA_DIR || '/data';
 const BACKUP_DIR = path.join(DATA_DIR, 'compose-backups');
@@ -28,6 +28,9 @@ export async function projects() {
         services: new Set(),
         containers: 0,
         running: 0,
+        // A project that contains kissd cannot be updated in-process: the run
+        // would kill the request that started it.
+        hasSelf: false,
       });
     }
     const entry = map.get(info.project);
@@ -35,6 +38,7 @@ export async function projects() {
     entry.services.add(info.service);
     entry.containers += 1;
     if (c.State === 'running') entry.running += 1;
+    if ((c.Names || []).some((n) => n.replace(/^\//, '') === SELF_NAME)) entry.hasSelf = true;
   }
 
   return [...map.values()]
@@ -145,22 +149,58 @@ export async function write(filePath, content, expectedMtimeMs) {
   };
 }
 
-// Streams `docker compose up -d` for the whole project.
-export async function apply(projectName, onData) {
+async function findProject(projectName) {
   const all = await projects();
   const project = all.find((p) => p.project === projectName);
   if (!project) throw new Error(`Unknown project: ${projectName}`);
+  return project;
+}
 
-  const args = composeArgs(project, 'up', ['-d']);
-  onData(`$ docker ${args.join(' ')}\n\n`);
-
+// Runs compose steps in order, streaming their combined output, and stops at
+// the first one that fails. Resolves with the final exit code.
+function streamSteps(project, steps, onData) {
   return new Promise((resolve) => {
-    const child = spawn('docker', args, { cwd: project.workdir });
-    child.stdout.on('data', (d) => onData(d.toString()));
-    child.stderr.on('data', (d) => onData(d.toString()));
-    child.on('error', (err) => { onData(`\nfailed to run docker: ${err.message}\n`); resolve(1); });
-    child.on('close', (code) => resolve(code ?? 1));
+    const runStep = (idx) => {
+      if (idx >= steps.length) return resolve(0);
+      const args = steps[idx];
+      onData(`$ docker ${args.join(' ')}\n\n`);
+      const child = spawn('docker', args, { cwd: project.workdir });
+      child.stdout.on('data', (d) => onData(d.toString()));
+      child.stderr.on('data', (d) => onData(d.toString()));
+      child.on('error', (err) => { onData(`\nfailed to run docker: ${err.message}\n`); resolve(1); });
+      child.on('close', (code) => {
+        if (code !== 0) return resolve(code ?? 1);
+        runStep(idx + 1);
+      });
+    };
+    runStep(0);
   });
+}
+
+// Streams `docker compose up -d` for the whole project.
+export async function apply(projectName, onData) {
+  const project = await findProject(projectName);
+  return streamSteps(project, [composeArgs(project, 'up', ['-d'])], onData);
+}
+
+// Pulls every image in the project, then recreates the services whose image
+// actually changed. --ignore-pull-failures keeps a locally-built service (one
+// with no image to pull) from aborting the update for everything else.
+export async function update(projectName, onData) {
+  const project = await findProject(projectName);
+
+  if (project.hasSelf) {
+    onData(`This project runs kissd itself (${SELF_NAME}).\n`);
+    onData('Handing the compose run to the host so it survives this container being replaced.\n');
+    onData('The panel will drop out for a few seconds — reload once it returns.\n');
+    updateSelfDetached(project);
+    return 0;
+  }
+
+  return streamSteps(project, [
+    composeArgs(project, 'pull', ['--ignore-pull-failures']),
+    composeArgs(project, 'up', ['-d']),
+  ], onData);
 }
 
 export async function backups(projectName) {

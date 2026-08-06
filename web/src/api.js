@@ -52,16 +52,24 @@ export const api = {
   alerts: () => req('GET', '/api/alerts'),
 };
 
+// A failed stream never has usable output, so surface the reason rather than
+// piping an error page into the log. The body may be JSON or plain text.
+async function failure(res, fallback) {
+  const text = await res.text().catch(() => '');
+  try {
+    return new Error(JSON.parse(text)?.error || fallback);
+  } catch {
+    return new Error(text.trim() || fallback);
+  }
+}
+
 // Update streams plain text as it runs, so it needs the raw fetch reader.
 export async function streamUpdate(id, onChunk) {
-  const res = await fetch(`/api/containers/${id}/update`, {
+  const res = await fetch(`/api/containers/${encodeURIComponent(id)}/update`, {
     method: 'POST',
     credentials: 'same-origin',
   });
-  if (!res.ok && res.headers.get('content-type')?.includes('application/json')) {
-    const data = await res.json().catch(() => ({}));
-    throw new Error(data.error || `Update failed (${res.status})`);
-  }
+  if (!res.ok) throw await failure(res, `Update failed (${res.status})`);
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   for (;;) {
@@ -79,10 +87,7 @@ export async function streamPost(url, onChunk, body) {
     headers: body ? { 'Content-Type': 'application/json' } : undefined,
     body: body ? JSON.stringify(body) : undefined,
   });
-  if (!res.ok && res.headers.get('content-type')?.includes('application/json')) {
-    const data = await res.json().catch(() => ({}));
-    throw new Error(data.error || `Request failed (${res.status})`);
-  }
+  if (!res.ok) throw await failure(res, `Request failed (${res.status})`);
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   for (;;) {

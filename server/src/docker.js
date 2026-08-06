@@ -223,12 +223,17 @@ export async function detail(id) {
   };
 }
 
+// The -p/-f flags that pin a compose run to exactly the project the labels
+// describe, rather than whatever the working directory happens to contain.
+export function composeFlags(info) {
+  const flags = [];
+  if (info.project) flags.push('-p', info.project);
+  for (const f of info.files || []) flags.push('-f', f);
+  return flags;
+}
+
 function composeArgs(info, sub, extra = []) {
-  const args = ['compose'];
-  if (info.project) args.push('-p', info.project);
-  for (const f of info.files) args.push('-f', f);
-  args.push(sub, ...extra);
-  return args;
+  return ['compose', ...composeFlags(info), sub, ...extra];
 }
 
 // Streams combined stdout/stderr of `docker compose pull` then `up -d`.
@@ -266,12 +271,15 @@ export function update(info, onData) {
 
 // Updating kissd itself would kill the process mid-request, so the
 // compose run is handed to the host (via PID 1's namespaces) and detached —
-// it outlives this container's replacement.
+// it outlives this container's replacement. `info` may describe one service or
+// a whole project; without a service name the run covers every service.
 export function updateSelfDetached(info) {
+  const flags = composeFlags(info).map((a) => JSON.stringify(a)).join(' ');
+  const target = info.service ? ` ${JSON.stringify(info.service)}` : '';
   const cmd = [
     `cd ${JSON.stringify(info.workdir)}`,
-    'docker compose pull',
-    'docker compose up -d --build',
+    `docker compose ${flags} pull${target}`,
+    `docker compose ${flags} up -d --build${target}`,
   ].join(' && ');
   const child = spawn(
     'nsenter',

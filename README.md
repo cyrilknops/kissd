@@ -60,7 +60,7 @@ about how your host is arranged, and gets out of the way.
 |---|---|
 | 📦 **Containers** | Every container on the host, as cards grouped by compose project, with live CPU, memory, health, ports and uptime |
 | 🔍 **Detail page** | Per-container stats, mounts, networks, published ports, restart policy, failing healthcheck output, and live logs |
-| 🎛️ **Actions** | Start, stop, restart, and update via `docker compose pull && up -d`, resolved from each container's own compose labels |
+| 🎛️ **Actions** | Start, stop, restart, and update via `docker compose pull && up -d`, resolved from each container's own compose labels — one service, or a whole project at once from its group header |
 | 📈 **Host metrics** | CPU, load, memory, swap, network throughput, per-mount disk usage |
 | 🔔 **Alerts** | ntfy push when a container stops, goes unhealthy, or enters a restart loop — plus disk, memory and load thresholds |
 | 📝 **Compose** | View and edit the compose file behind any project, with validation, automatic backups and one-click apply |

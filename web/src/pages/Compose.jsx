@@ -1,42 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { api, streamPost, bytes } from '../api';
-import Modal from '../components/Modal';
-
-function ApplyModal({ project, onClose, onDone }) {
-  const [log, setLog] = useState('');
-  const [running, setRunning] = useState(true);
-  const preRef = useRef(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        await streamPost('/api/compose/apply', (chunk) => {
-          if (!cancelled) setLog((t) => t + chunk);
-        }, { project });
-      } catch (err) {
-        if (!cancelled) setLog((t) => `${t}\n${err.message}\n`);
-      } finally {
-        if (!cancelled) { setRunning(false); onDone(); }
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [project, onDone]);
-
-  useEffect(() => {
-    if (preRef.current) preRef.current.scrollTop = preRef.current.scrollHeight;
-  }, [log]);
-
-  return (
-    <Modal title={`docker compose up -d · ${project}`} onClose={running ? () => {} : onClose} flush
-           footer={<button className="btn" onClick={onClose} disabled={running}>
-             {running ? 'Running…' : 'Close'}
-           </button>}>
-      <pre className="stream" ref={preRef} style={{ maxHeight: '50vh' }}>{log || 'Starting…'}</pre>
-    </Modal>
-  );
-}
+import { api, bytes } from '../api';
+import StreamModal from '../components/StreamModal';
 
 export default function Compose() {
   const [params, setParams] = useSearchParams();
@@ -46,6 +11,7 @@ export default function Compose() {
   const [status, setStatus] = useState(null);
   const [busy, setBusy] = useState(false);
   const [applying, setApplying] = useState(null);
+  const [updating, setUpdating] = useState(null);
   const [history, setHistory] = useState([]);
   const taRef = useRef(null);
 
@@ -169,6 +135,14 @@ export default function Compose() {
               <div className="compose-project-head">
                 <strong>{p.project}</strong>
                 <span className="dim">{p.running}/{p.containers}</span>
+                <button
+                  className="btn xs"
+                  style={{ marginLeft: 'auto' }}
+                  title={`Pull and recreate all ${p.services.length} services in ${p.project}`}
+                  onClick={() => setUpdating(p.project)}
+                >
+                  Update
+                </button>
               </div>
               <div className="dim mono compose-services">{p.services.join(', ')}</div>
               {p.files.map((f) => (
@@ -242,10 +216,20 @@ export default function Compose() {
       )}
 
       {applying && (
-        <ApplyModal
-          project={applying}
+        <StreamModal
+          title={`docker compose up -d · ${applying}`}
+          url="/api/compose/apply"
+          body={{ project: applying }}
           onClose={() => setApplying(null)}
-          onDone={() => {}}
+        />
+      )}
+
+      {updating && (
+        <StreamModal
+          title={`docker compose pull && up -d · ${updating}`}
+          url="/api/compose/update"
+          body={{ project: updating }}
+          onClose={() => setUpdating(null)}
         />
       )}
     </>
