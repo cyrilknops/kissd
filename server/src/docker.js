@@ -4,10 +4,12 @@
 // hand-rebuilt config.
 import Docker from 'dockerode';
 import { spawn } from 'node:child_process';
+import * as registry from './registry.js';
 
 export const docker = new Docker({ socketPath: '/var/run/docker.sock' });
 
 export const SELF_NAME = process.env.SELF_NAME || 'kissd';
+const DATA_DIR = process.env.DATA_DIR || '/data';
 
 const L = {
   project: 'com.docker.compose.project',
@@ -249,7 +251,7 @@ export function update(info, onData) {
       if (idx >= steps.length) return resolve(0);
       const args = steps[idx];
       onData(`\n$ docker ${args.join(' ')}\n`);
-      const child = spawn('docker', args, { cwd: info.workdir });
+      const child = spawn('docker', args, { cwd: info.workdir, env: registry.env() });
       child.stdout.on('data', (d) => onData(d.toString()));
       child.stderr.on('data', (d) => onData(d.toString()));
       child.on('error', (err) => {
@@ -269,21 +271,67 @@ export function update(info, onData) {
   });
 }
 
+// The host-side path of DATA_DIR. A detached run executes in the host's mount
+// namespace, where /data does not exist, so the registry config has to be
+// pointed at wherever that volume actually lives. Read from this container's
+// own mount table rather than guessed from the compose file.
+let dataHostPath;
+async function selfDataHostPath() {
+  if (dataHostPath !== undefined) return dataHostPath;
+  dataHostPath = '';
+  try {
+    const all = await docker.listContainers({ all: true });
+    const self = all.find((c) => shortName(c.Names) === SELF_NAME);
+    if (self) {
+      const info = await docker.getContainer(self.Id).inspect();
+      const mount = (info.Mounts || []).find((m) => m.Destination === DATA_DIR);
+      if (mount?.Source) dataHostPath = mount.Source;
+    }
+  } catch {
+    // Not fatal: the run just falls back to the host's own docker config.
+  }
+  return dataHostPath;
+}
+
+// A fixed script, so nothing here is ever built by string interpolation. Every
+// value arrives as a positional parameter, which the shell never re-parses —
+// a project name or path containing $(…), a backtick or a quote is inert.
+//
+// --ignore-pull-failures matters more here than anywhere else: kissd declares
+// itself with `build: .` and a local-only `image:`, so a plain `pull` always
+// exits non-zero, and the && would then skip the `up -d --build` that does the
+// actual work. Nothing would be updated, and with stdio ignored nobody would
+// ever find out.
+const SELF_UPDATE_SH = `
+sleep 1
+if [ -n "$1" ]; then DOCKER_CONFIG=$1; export DOCKER_CONFIG; fi
+cd "$2" || exit 1
+svc=$3
+shift 3
+if [ -n "$svc" ]; then
+  docker compose "$@" pull --ignore-pull-failures "$svc"
+  docker compose "$@" up -d --build "$svc"
+else
+  docker compose "$@" pull --ignore-pull-failures
+  docker compose "$@" up -d --build
+fi
+`;
+
 // Updating kissd itself would kill the process mid-request, so the
 // compose run is handed to the host (via PID 1's namespaces) and detached —
 // it outlives this container's replacement. `info` may describe one service or
 // a whole project; without a service name the run covers every service.
-export function updateSelfDetached(info) {
-  const flags = composeFlags(info).map((a) => JSON.stringify(a)).join(' ');
-  const target = info.service ? ` ${JSON.stringify(info.service)}` : '';
-  const cmd = [
-    `cd ${JSON.stringify(info.workdir)}`,
-    `docker compose ${flags} pull${target}`,
-    `docker compose ${flags} up -d --build${target}`,
-  ].join(' && ');
+export async function updateSelfDetached(info) {
+  const data = await selfDataHostPath();
+  // registry.CONFIG_DIR lives under DATA_DIR; same suffix, host-side root.
+  const configDir = data ? data + registry.CONFIG_DIR.slice(DATA_DIR.length) : '';
   const child = spawn(
     'nsenter',
-    ['-t', '1', '-m', '-u', '-i', '-n', '-p', '--', 'sh', '-c', `sleep 1 && ${cmd}`],
+    [
+      '-t', '1', '-m', '-u', '-i', '-n', '-p', '--',
+      'sh', '-c', SELF_UPDATE_SH, 'sh',
+      configDir, info.workdir, info.service || '', ...composeFlags(info),
+    ],
     { detached: true, stdio: 'ignore' },
   );
   child.unref();

@@ -13,6 +13,7 @@ import * as alerts from './alerts.js';
 import * as system from './system.js';
 import * as claude from './claude.js';
 import * as compose from './compose.js';
+import * as registry from './registry.js';
 import { send as ntfySend } from './ntfy.js';
 import { handleTerminal, handleLogs } from './terminal.js';
 
@@ -120,7 +121,7 @@ app.post('/api/containers/:id/update', auth.requireAuth, async (req, res) => {
       res.write('Updating kissd itself.\n');
       res.write('Handing the compose run to the host so it survives this container being replaced.\n');
       res.write('The panel will drop out for a few seconds — reload once it returns.\n');
-      dockerApi.updateSelfDetached(compose);
+      await dockerApi.updateSelfDetached(compose);
       return res.end();
     }
 
@@ -235,7 +236,11 @@ app.post('/api/compose/update', auth.requireAuth, async (req, res) => {
   res.setHeader('X-Accel-Buffering', 'no');
   try {
     const code = await compose.update(String(project || ''), (chunk) => res.write(chunk));
-    res.write(code === 0 ? '\nUpdate complete.\n' : `\nUpdate failed (exit ${code}).\n`);
+    // A detached run has no exit code to report, and the handoff lines already
+    // said what happens next — claiming completion here would contradict them.
+    if (code !== compose.DETACHED) {
+      res.write(code === 0 ? '\nUpdate complete.\n' : `\nUpdate failed (exit ${code}).\n`);
+    }
   } catch (err) {
     res.write(`\nError: ${err.message}\n`);
   }
@@ -299,7 +304,23 @@ app.get('/api/settings', auth.requireAuth, (req, res) => {
 app.put('/api/settings', auth.requireAuth, (req, res) => {
   try {
     const updated = settingsStore.applyPatch(req.body || {});
+    // Registry logins only take effect once they are on disk where the docker
+    // CLI will look for them, so the config is rewritten with every save.
+    registry.write(updated);
     res.json(settingsStore.redact(updated));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Verifies each login against the real registry. Entries the browser sent with
+// a blank password fall back to the stored one, so a saved credential can be
+// re-tested without retyping it.
+app.post('/api/settings/registries/test', auth.requireAuth, async (req, res) => {
+  try {
+    const list = settingsStore.withStoredPasswords(req.body?.registries || []);
+    if (!list.length) return res.status(400).json({ error: 'No registries configured' });
+    res.json({ results: await Promise.all(list.map((r) => registry.test(r))) });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -371,6 +392,14 @@ server.on('upgrade', (req, socket, head) => {
 
 server.listen(PORT, () => {
   console.log(`kissd listening on :${PORT}`);
+  // The docker config lives on the data volume, but rewriting it at boot keeps
+  // it in step with settings.json after a restore, an edit or a fresh volume.
+  try {
+    const n = registry.write(settingsStore.load());
+    if (n) console.log(`registry logins loaded for ${n} registr${n === 1 ? 'y' : 'ies'}`);
+  } catch (err) {
+    console.error(`could not write the docker config: ${err.message}`);
+  }
   // Sample stats once up front so the first page load already has numbers.
   dockerApi.primeStats();
   alerts.start();

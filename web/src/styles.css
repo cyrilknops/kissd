@@ -282,6 +282,15 @@ td.dim, .dim { color: var(--muted); }
 .field .hint { font-size: 11px; color: var(--muted); margin-top: 5px; }
 .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 
+/* Server, username, password, then Remove. The button is nudged down so it
+   lines up with the inputs rather than with their labels. */
+.registry-row { display: grid; grid-template-columns: 1.4fr 1fr 1fr auto; gap: 12px; align-items: start; }
+.registry-row .btn { margin-top: 23px; }
+@media (max-width: 820px) {
+  .registry-row { grid-template-columns: 1fr; gap: 0; }
+  .registry-row .btn { margin: 0 0 14px; justify-self: start; }
+}
+
 .check { display: flex; align-items: center; gap: 9px; padding: 7px 0; }
 .check input { width: 16px; height: 16px; accent-color: var(--accent); }
 
