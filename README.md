@@ -124,31 +124,38 @@ openssl rand -hex 32    # use this for KISSD_JWT_SECRET
 Then bring it up:
 
 ```bash
-docker compose up -d --build
+docker compose up -d
 ```
 
+That pulls [`cyrilknops/kissd`](https://hub.docker.com/r/cyrilknops/kissd) from
+Docker Hub — no build, no toolchain, ~110 MB. `KISSD_TAG` in `.env` picks which
+build you run:
+
+| `KISSD_TAG` | Moves? | Use it when |
+|---|---|---|
+| `latest` *(default)* | yes, on every merge to `main` | you want the panel's **Update** button to fetch the newest build |
+| `sha-<commit>` | never | you would rather pin, and upgrade deliberately |
+
+Images are **amd64 only**. On arm64 — a Pi, Graviton, Apple Silicon — build it
+yourself as below.
+
 <details>
-<summary>🐳 Or use the prebuilt image instead of building</summary>
+<summary>🔨 Or build the image yourself</summary>
 
 <br>
 
-Every merge to `main` publishes [`cyrilknops/kissd`](https://hub.docker.com/r/cyrilknops/kissd)
-to Docker Hub, amd64 only. To pull it rather than build locally, drop the
-`build:` line from `docker-compose.yml` and point `image:` at the published one:
+Tag your build and point `KISSD_TAG` at it. Nothing else changes:
 
-```yaml
-services:
-  kissd:
-    image: cyrilknops/kissd:latest
+```bash
+docker build -t cyrilknops/kissd:dev .
+echo "KISSD_TAG=dev" >> .env
+docker compose up -d
 ```
 
-| Tag | Moves? | Use it when |
-|---|---|---|
-| `latest` | yes, on every merge to `main` | you want the panel's **Update** button to actually fetch something |
-| `sha-<commit>` | never | you would rather pin and upgrade deliberately |
-
-Building locally stays supported, and is still what the instructions above do —
-the image is a convenience, not a requirement.
+Rebuilding is then `docker build -t cyrilknops/kissd:dev . && docker compose up -d`.
+Because the tag only exists locally, the panel's **Update** button cannot swap in
+someone else's build: the `pull` fails harmlessly and the container is recreated
+from the image you built.
 
 </details>
 
@@ -158,8 +165,9 @@ terminals and log streaming will not work without them.
 > 💡 Claude Code is **not** in the image — it is ~270 MB and would be pulled on
 > every update. Install it with a button from the Terminal page instead; it
 > lands in the `data/` volume and survives rebuilds. If your host has no
-> outbound npm access at runtime, bake it in with
-> `--build-arg WITH_CLAUDE=1`.
+> outbound npm access at runtime, build the image yourself with
+> `docker build --build-arg WITH_CLAUDE=1 -t cyrilknops/kissd:dev .` and set
+> `KISSD_TAG=dev`.
 
 <details>
 <summary>📋 Nginx Proxy Manager settings</summary>
@@ -187,6 +195,7 @@ kissd joins an external network named `proxy-tier` by default. Change that in
 |---|---|
 | `KISSD_ADMIN_USER` / `KISSD_ADMIN_PASSWORD` | Login. Hashed at boot; never written to disk. |
 | `KISSD_JWT_SECRET` | Signs session cookies. Changing it logs everyone out. |
+| `KISSD_TAG` | Which `cyrilknops/kissd` tag to run. `latest` by default; `sha-<commit>` to pin, or a tag you built yourself. |
 | `REPO_DIR` | Where your compose files live. Bind-mounted at the *same* path inside the container so `docker compose` resolves relative binds correctly. |
 | `NTFY_URL` / `NTFY_TOPIC` / `NTFY_TOKEN` | Optional first-run seed for notifications. |
 
@@ -300,8 +309,8 @@ the logs itself.
 It is **not bundled** in the image. Hit **Install Claude Code** on the Terminal
 page and it is fetched on demand — about six seconds — into
 `data/npm-global/`. Because that is the mounted volume and not the image
-layer, it survives `docker compose up --build`, container recreation and image
-pulls. The same button updates it later.
+layer, it survives container recreation, image pulls and rebuilds alike. The
+same button updates it later.
 
 Your sign-in persists in `data/home/`, so you authenticate once.
 
@@ -329,14 +338,20 @@ cd web && npm install && npm run dev
 ```
 
 Host metrics and the host shell only work inside the container, since they read
-`/proc/1/*` and `nsenter` into PID 1.
+`/proc/1/*` and `nsenter` into PID 1 — so to exercise those, build the image and
+run it under a tag of your own:
+
+```bash
+docker build -t cyrilknops/kissd:dev . && KISSD_TAG=dev docker compose up -d
+```
 
 ### 🐳 Publishing the image
 
 `.github/workflows/docker-publish.yml` builds `cyrilknops/kissd` and pushes it to
 Docker Hub on every push to `main`, plus on demand from the Actions tab. It tags
-`latest` and an immutable `sha-<commit>`, and caches layers between runs so a
-repeat build skips both `npm install`s and the `node-pty` compile.
+`latest` and an immutable `sha-<commit>`, and caches layers between runs. A cold
+build takes about 70 seconds; `docker-compose.yml` runs whichever tag `KISSD_TAG`
+names, so a merge to `main` is what a `latest` deployment picks up next.
 
 Pull requests run the same build but stop before pushing, so a Dockerfile that no
 longer builds fails the PR rather than `main`.

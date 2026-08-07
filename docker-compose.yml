@@ -4,8 +4,10 @@ networks:
 
 services:
   kissd:
-    build: .
-    image: kissd:latest
+    # Published from main by .github/workflows/docker-publish.yml. Pin a build
+    # with KISSD_TAG=sha-<commit>, or point it at a local `docker build -t
+    # cyrilknops/kissd:dev .` with KISSD_TAG=dev.
+    image: cyrilknops/kissd:${KISSD_TAG:-latest}
     container_name: kissd
     restart: unless-stopped
     # Required for the host shell (nsenter into PID 1's namespaces) and for
