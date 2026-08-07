@@ -1,0 +1,108 @@
+name: Publish Docker image
+
+# A merge to main is a release: it republishes :latest. Every build also gets
+# an immutable :sha-<commit> tag, which is what to pin to if you would rather
+# :latest did not move under a running deployment.
+#
+# Pull requests run the same build but stop short of pushing, so a Dockerfile
+# that no longer builds is caught before it reaches main rather than after.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  IMAGE: cyrilknops/kissd
+
+# Several merges in quick succession should end with the newest commit as
+# :latest, not with whichever build happened to finish last.
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    env:
+      # A pull request proves the image still builds; only main publishes it.
+      PUBLISH: ${{ github.event_name != 'pull_request' }}
+
+    steps:
+      # login-action's own failure is "Username and password required", which
+      # does not say where the credentials are meant to go. This is the only
+      # setup step a fork has to do by hand, so it gets a real message.
+      - name: Check the Docker Hub credentials are present
+        if: env.PUBLISH == 'true'
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          missing=0
+          if [ -z "$DOCKERHUB_USERNAME" ]; then
+            echo "::error::DOCKERHUB_USERNAME is not set. Add it under Settings -> Secrets and variables -> Actions."
+            missing=1
+          fi
+          if [ -z "$DOCKERHUB_TOKEN" ]; then
+            echo "::error::DOCKERHUB_TOKEN is not set. Create an access token at hub.docker.com -> Account settings -> Personal access tokens, then add it under Settings -> Secrets and variables -> Actions."
+            missing=1
+          fi
+          exit $missing
+
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        if: env.PUBLISH == 'true'
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # Also derives the standard OCI labels (source, revision, created) from
+      # the repository, so `docker inspect` points back here.
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=raw,value=latest
+            type=sha,prefix=sha-,format=short
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: ${{ env.PUBLISH == 'true' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Both npm installs and the node-pty compile dominate the build; without
+          # a layer cache every run redoes all of it from scratch.
+          cache-from: type=gha
+          # ignore-error so a hiccup in the cache backend degrades the build to
+          # a slow one rather than failing the publish outright.
+          cache-to: type=gha,mode=max,ignore-error=true
+          # A provenance attestation would add a second, imageless entry to the
+          # manifest list, which Docker Hub renders as an "unknown/unknown"
+          # platform next to a single-platform image. Not worth the confusion.
+          provenance: false
+
+      - name: Summarise the build
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          if [ "$PUBLISH" = "true" ]; then
+            {
+              echo "### Published"
+              echo
+              printf '%s\n' "$TAGS" | sed 's/^/- `/; s/$/`/'
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "### Built, not published" >> "$GITHUB_STEP_SUMMARY"
+            echo >> "$GITHUB_STEP_SUMMARY"
+            echo "The image builds. Merging to \`main\` is what pushes it." >> "$GITHUB_STEP_SUMMARY"
+          fi
