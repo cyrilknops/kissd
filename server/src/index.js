@@ -354,9 +354,26 @@ app.get('/api/alerts', auth.requireAuth, (req, res) => {
 // --- static frontend -------------------------------------------------------
 
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
-app.use(express.static(PUBLIC_DIR));
+
+// Vite fingerprints everything under /assets, so those are safe to pin for a
+// year. The shell, the worker and the manifest must not be: a stale service
+// worker would keep serving an old build forever.
+const ASSET_DIR = `${path.sep}assets${path.sep}`;
+const NEVER_CACHE = new Set(['index.html', 'sw.js', 'manifest.webmanifest']);
+
+app.use(express.static(PUBLIC_DIR, {
+  setHeaders(res, filePath) {
+    if (NEVER_CACHE.has(path.basename(filePath))) {
+      res.setHeader('Cache-Control', 'no-cache');
+    } else if (filePath.includes(ASSET_DIR)) {
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    }
+  },
+}));
+
 app.get('*', (req, res) => {
   if (req.path.startsWith('/api/')) return res.status(404).json({ error: 'Not found' });
+  res.setHeader('Cache-Control', 'no-cache');
   return res.sendFile(path.join(PUBLIC_DIR, 'index.html'));
 });
 

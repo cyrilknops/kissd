@@ -67,9 +67,22 @@ about how your host is arranged, and gets out of the way.
 | 📝 **Compose** | View and edit the compose file behind any project, with validation, automatic backups and one-click apply |
 | 🧹 **Maintenance** | Disk usage breakdown and per-target pruning, with named volumes handled one at a time |
 | 💻 **Terminals** | A shell in any container, a root shell on the host, and Claude Code — all in the browser |
+| 📱 **Phone-ready** | The same panel on a phone: the sidebar becomes a drawer, dialogs become sheets, and it installs to the home screen as a PWA |
 
 Everything is one screen deep. No wizard, no onboarding, no marketplace, no
 telemetry.
+
+### 📱 On a phone
+
+kissd ships a web app manifest and a service worker, so **Add to home screen**
+(or Chrome's install prompt, which the sidebar surfaces as an **Install app**
+button) gives you a standalone app with no browser chrome. Opening it offline
+shows the panel rather than a browser error page — it just has no data until
+the server is reachable again.
+
+The service worker caches only the app shell and its hashed assets. Nothing
+under `/api/` is ever cached, so you are never looking at a stale container
+list, and no authenticated response is written to disk.
 
 ## 🏗️ How it works
 
