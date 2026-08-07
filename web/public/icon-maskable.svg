@@ -1,0 +1,49 @@
+<!-- Full-bleed variant of favicon.svg, used to render the maskable PWA icon and
+     the iOS home-screen icon. Android and iOS both crop an installed icon to
+     their own shape, so this one has no rounded corners of its own and keeps
+     the mark inside the 80% safe zone. Regenerate the PNGs with:
+     node -e "require('sharp')('web/public/icon-maskable.svg').resize(512).png().toFile('web/public/icon-maskable-512.png')" -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="upper" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#e82a4d"/>
+      <stop offset="100%" stop-color="#c81f3f"/>
+    </linearGradient>
+    <linearGradient id="lower" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ff5c7c"/>
+      <stop offset="100%" stop-color="#e02a4d"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="512" height="512" fill="#12151d"/>
+
+  <!-- The 64-unit mark from favicon.svg, scaled and centred so its far corners
+       land just inside the safe circle. -->
+  <g transform="translate(38.4 31.6) scale(6.8)">
+    <path fill="url(#upper)" d="
+      M6 32
+      C12 22 19 18 24 21
+      C28 23 30 26 32 26
+      C34 26 36 23 40 21
+      C45 18 52 22 58 32
+      C50 28 41 27 32 27
+      C23 27 14 28 6 32
+      Z"/>
+
+    <path fill="url(#lower)" d="
+      M6 35
+      C14 33 23 32 32 32
+      C41 32 50 33 58 35
+      C52 43 43 48 32 48
+      C21 48 12 43 6 34
+      Z"/>
+
+    <path fill="#fff" opacity=".25" d="
+      M16 38
+      C22 41 27 42 32 42
+      C37 42 42 41 48 38
+      C42 43 37 45 32 45
+      C27 45 22 43 16 38
+      Z"/>
+  </g>
+</svg>

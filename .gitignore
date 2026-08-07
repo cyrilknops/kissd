@@ -2,3 +2,5 @@ node_modules/
 dist/
 data/
 .env
+# where the Dockerfile drops the built frontend
+server/public/

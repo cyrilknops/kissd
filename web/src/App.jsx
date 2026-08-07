@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { NavLink, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { api } from './api';
+import { watchInstallPrompt } from './pwa';
 import Login from './pages/Login';
 import Overview from './pages/Overview';
 import Containers from './pages/Containers';
@@ -24,8 +25,11 @@ export default function App() {
   const [containers, setContainers] = useState([]);
   const [containersLoaded, setContainersLoaded] = useState(false);
   const [pendingShell, setPendingShell] = useState(null);
+  const [navOpen, setNavOpen] = useState(false);
+  const [installPrompt, setInstallPrompt] = useState(null);
   const location = useLocation();
   const navigate = useNavigate();
+  const drawerCloseRef = useRef(null);
 
   const reload = useCallback(async () => {
     try {
@@ -47,6 +51,19 @@ export default function App() {
     return () => clearInterval(id);
   }, [authed, reload]);
 
+  useEffect(() => watchInstallPrompt(setInstallPrompt), []);
+
+  // The drawer is a navigation aid, so arriving somewhere is what dismisses it.
+  useEffect(() => { setNavOpen(false); }, [location.pathname]);
+
+  useEffect(() => {
+    if (!navOpen) return undefined;
+    drawerCloseRef.current?.focus();
+    const onKey = (e) => { if (e.key === 'Escape') setNavOpen(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [navOpen]);
+
   if (authed === null) return null;
   if (!authed) return <Login onSuccess={() => setAuthed(true)} />;
 
@@ -56,12 +73,49 @@ export default function App() {
     navigate('/', { replace: true });
   }
 
+  async function install() {
+    const prompt = installPrompt;
+    setInstallPrompt(null);
+    await prompt.prompt();
+  }
+
   const unhealthy = containers.filter((c) => c.health === 'unhealthy' || c.state === 'exited').length;
   const onTerminal = location.pathname === '/terminal';
+  const current = NAV.find((n) => (n.end ? location.pathname === n.to : location.pathname.startsWith(n.to)));
 
   return (
-    <div className="shell">
-      <aside className="sidebar">
+    <div className={`shell${navOpen ? ' nav-open' : ''}`}>
+      {/* Replaces the sidebar on narrow screens; hidden by CSS on wide ones. */}
+      <header className="topbar">
+        {/* Stays "open" even while the drawer is out, because the drawer
+            covers this button — closing happens from inside it, the backdrop
+            or Escape. */}
+        <button
+          className="icon-btn"
+          onClick={() => setNavOpen(true)}
+          aria-label="Open menu"
+          aria-expanded={navOpen}
+          aria-controls="sidebar"
+        >
+          <span aria-hidden="true">☰</span>
+        </button>
+        <span className="topbar-title">
+          <span className="dot" />
+          {current?.label || 'kissd'}
+        </span>
+        {unhealthy > 0 && (
+          <span className="pill exited" style={{ marginLeft: 'auto' }}>{unhealthy} down</span>
+        )}
+      </header>
+
+      <button
+        className="nav-backdrop"
+        tabIndex={-1}
+        aria-hidden="true"
+        onClick={() => setNavOpen(false)}
+      />
+
+      <aside className="sidebar" id="sidebar">
         <div className="brand">
           <span className="dot" />
           <span>
@@ -69,6 +123,14 @@ export default function App() {
             <small>keep it super simple</small>
             <small className="version">v{__APP_VERSION__}</small>
           </span>
+          <button
+            ref={drawerCloseRef}
+            className="icon-btn drawer-close"
+            onClick={() => setNavOpen(false)}
+            aria-label="Close menu"
+          >
+            <span aria-hidden="true">✕</span>
+          </button>
         </div>
 
         {NAV.map((n) => (
@@ -78,7 +140,7 @@ export default function App() {
             end={n.end}
             className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
           >
-            <span style={{ width: 16, textAlign: 'center' }}>{n.icon}</span>
+            <span className="nav-icon" aria-hidden="true">{n.icon}</span>
             {n.label}
             {n.to === '/containers' && unhealthy > 0 && (
               <span className="pill exited" style={{ marginLeft: 'auto', fontSize: 11 }}>{unhealthy}</span>
@@ -87,6 +149,11 @@ export default function App() {
         ))}
 
         <div className="sidebar-foot">
+          {installPrompt && (
+            <button className="btn sm" style={{ width: '100%', marginBottom: 6 }} onClick={install}>
+              Install app
+            </button>
+          )}
           <button className="btn sm" style={{ width: '100%' }} onClick={logout}>Sign out</button>
         </div>
       </aside>
