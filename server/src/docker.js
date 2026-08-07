@@ -297,11 +297,11 @@ async function selfDataHostPath() {
 // value arrives as a positional parameter, which the shell never re-parses —
 // a project name or path containing $(…), a backtick or a quote is inert.
 //
-// --ignore-pull-failures matters more here than anywhere else: kissd declares
-// itself with `build: .` and a local-only `image:`, so a plain `pull` always
-// exits non-zero, and the && would then skip the `up -d --build` that does the
-// actual work. Nothing would be updated, and with stdio ignored nobody would
-// ever find out.
+// --ignore-pull-failures is what keeps this working for a kissd that builds its
+// own image rather than pulling the published one: a `build: .` service with a
+// local-only `image:` makes a plain `pull` exit non-zero, and the && would then
+// skip the `up -d --build` that does the actual work. Nothing would be updated,
+// and with stdio ignored nobody would ever find out.
 const SELF_UPDATE_SH = `
 sleep 1
 if [ -n "$1" ]; then DOCKER_CONFIG=$1; export DOCKER_CONFIG; fi
