@@ -338,6 +338,9 @@ Docker Hub on every push to `main`, plus on demand from the Actions tab. It tags
 `latest` and an immutable `sha-<commit>`, and caches layers between runs so a
 repeat build skips both `npm install`s and the `node-pty` compile.
 
+Pull requests run the same build but stop before pushing, so a Dockerfile that no
+longer builds fails the PR rather than `main`.
+
 It needs two repository secrets under **Settings → Secrets and variables →
 Actions**. Without them the workflow stops on its first step and names the one
 that is missing, rather than failing later with "Username and password required":
