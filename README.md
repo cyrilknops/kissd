@@ -127,6 +127,31 @@ Then bring it up:
 docker compose up -d --build
 ```
 
+<details>
+<summary>🐳 Or use the prebuilt image instead of building</summary>
+
+<br>
+
+Every merge to `main` publishes [`cyrilknops/kissd`](https://hub.docker.com/r/cyrilknops/kissd)
+to Docker Hub, amd64 only. To pull it rather than build locally, drop the
+`build:` line from `docker-compose.yml` and point `image:` at the published one:
+
+```yaml
+services:
+  kissd:
+    image: cyrilknops/kissd:latest
+```
+
+| Tag | Moves? | Use it when |
+|---|---|---|
+| `latest` | yes, on every merge to `main` | you want the panel's **Update** button to actually fetch something |
+| `sha-<commit>` | never | you would rather pin and upgrade deliberately |
+
+Building locally stays supported, and is still what the instructions above do —
+the image is a convenience, not a requirement.
+
+</details>
+
 Point your proxy at `kissd:8090`. **Websocket upgrades must be enabled** — the
 terminals and log streaming will not work without them.
 
@@ -305,6 +330,24 @@ cd web && npm install && npm run dev
 
 Host metrics and the host shell only work inside the container, since they read
 `/proc/1/*` and `nsenter` into PID 1.
+
+### 🐳 Publishing the image
+
+`.github/workflows/docker-publish.yml` builds `cyrilknops/kissd` and pushes it to
+Docker Hub on every push to `main`, plus on demand from the Actions tab. It tags
+`latest` and an immutable `sha-<commit>`, and caches layers between runs so a
+repeat build skips both `npm install`s and the `node-pty` compile.
+
+It needs two repository secrets under **Settings → Secrets and variables →
+Actions**. Without them the workflow stops on its first step and names the one
+that is missing, rather than failing later with "Username and password required":
+
+| Secret | Where it comes from |
+|---|---|
+| `DOCKERHUB_USERNAME` | your Docker Hub account name |
+| `DOCKERHUB_TOKEN` | Docker Hub → Account settings → Personal access tokens, **Read & Write** |
+
+Forking? Change `IMAGE` at the top of the workflow to your own namespace.
 
 ## 📄 Licence
 
