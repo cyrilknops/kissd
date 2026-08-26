@@ -293,9 +293,11 @@ async function selfDataHostPath() {
   return dataHostPath;
 }
 
-// A fixed script, so nothing here is ever built by string interpolation. Every
+// Fixed scripts, so nothing here is ever built by string interpolation. Every
 // value arrives as a positional parameter, which the shell never re-parses —
 // a project name or path containing $(…), a backtick or a quote is inert.
+// Both take the same parameters ($1 docker config dir, $2 working dir,
+// $3 service or empty, then the -p/-f flags) so one spawn serves either.
 //
 // --ignore-pull-failures is what keeps this working for a kissd that builds its
 // own image rather than pulling the published one: a `build: .` service with a
@@ -317,22 +319,52 @@ else
 fi
 `;
 
-// Updating kissd itself would kill the process mid-request, so the
-// compose run is handed to the host (via PID 1's namespaces) and detached —
-// it outlives this container's replacement. `info` may describe one service or
-// a whole project; without a service name the run covers every service.
-export async function updateSelfDetached(info) {
-  const data = await selfDataHostPath();
-  // registry.CONFIG_DIR lives under DATA_DIR; same suffix, host-side root.
-  const configDir = data ? data + registry.CONFIG_DIR.slice(DATA_DIR.length) : '';
+// A reset is always project-wide, so the service name is ignored here.
+//
+// This is `up -d --force-recreate` rather than the `down && up -d` a reset runs
+// everywhere else, and deliberately so: this run recreates the very container
+// it was spawned from, and a detached run that dies as kissd goes away leaves
+// the project wherever the last command left it. One command that recreates
+// each container in turn can at worst strand the one it was working on — the
+// same exposure the self-update already has. `down` first would put every
+// service in the project on the wrong side of that window.
+const SELF_RESET_SH = `
+sleep 1
+if [ -n "$1" ]; then DOCKER_CONFIG=$1; export DOCKER_CONFIG; fi
+cd "$2" || exit 1
+shift 3
+docker compose "$@" up -d --force-recreate
+`;
+
+// Replacing or tearing down kissd itself would kill the process mid-request, so
+// the compose run is handed to the host (via PID 1's namespaces) and detached —
+// it outlives this container's replacement.
+function runSelfDetached(script, info, configDir) {
   const child = spawn(
     'nsenter',
     [
       '-t', '1', '-m', '-u', '-i', '-n', '-p', '--',
-      'sh', '-c', SELF_UPDATE_SH, 'sh',
+      'sh', '-c', script, 'sh',
       configDir, info.workdir, info.service || '', ...composeFlags(info),
     ],
     { detached: true, stdio: 'ignore' },
   );
   child.unref();
+}
+
+async function selfConfigDir() {
+  const data = await selfDataHostPath();
+  // registry.CONFIG_DIR lives under DATA_DIR; same suffix, host-side root.
+  return data ? data + registry.CONFIG_DIR.slice(DATA_DIR.length) : '';
+}
+
+// `info` may describe one service or a whole project; without a service name
+// the run covers every service.
+export async function updateSelfDetached(info) {
+  runSelfDetached(SELF_UPDATE_SH, info, await selfConfigDir());
+}
+
+// Recreates every container in the whole project, detached.
+export async function resetSelfDetached(info) {
+  runSelfDetached(SELF_RESET_SH, info, await selfConfigDir());
 }

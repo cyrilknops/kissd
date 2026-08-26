@@ -20,11 +20,15 @@ export default function Settings() {
   const [status, setStatus] = useState(null);
   const [busy, setBusy] = useState(false);
   const [alertLog, setAlertLog] = useState([]);
+  const [muted, setMuted] = useState([]);
   const [logins, setLogins] = useState(null);
 
   useEffect(() => {
     api.settings().then(setS).catch((e) => setStatus({ type: 'err', text: e.message }));
-    api.alerts().then(setAlertLog).catch(() => {});
+    api.alerts().then((a) => {
+      setAlertLog(a.log || []);
+      setMuted(a.muted || []);
+    }).catch(() => {});
   }, []);
 
   if (!s) return <p className="dim">Loading settings…</p>;
@@ -243,6 +247,34 @@ export default function Settings() {
             hour — is caught as well as a fast one. Down and unhealthy alerts fire on state
             changes, so a container you stopped on purpose won't keep nagging.
           </p>
+
+          <div style={{ borderTop: '1px solid var(--border)', marginTop: 14, paddingTop: 14 }}>
+            <div className="check">
+              <input type="checkbox" id="c-mute" checked={alerts.muteDuringUpdates !== false}
+                     onChange={(e) => patch('alerts', { muteDuringUpdates: e.target.checked })} />
+              <label htmlFor="c-mute" style={{ margin: 0 }}>Mute while updating</label>
+            </div>
+
+            {alerts.muteDuringUpdates !== false && (
+              <Num label="Settle grace" value={alerts.muteGraceSeconds} min={0} max={3600} suffix="seconds"
+                   hint="How long alerts stay muted after the compose run itself finishes."
+                   onChange={(v) => patch('alerts', { muteGraceSeconds: v })} />
+            )}
+
+            <p className="hint" style={{ marginTop: 10 }}>
+              An update, an apply or a reset stops and recreates containers on purpose, so no
+              push goes out for the container or project being worked on while the run is in
+              flight. The pre-update state stays the baseline, so a service that never comes
+              back is still reported once the mute lifts.
+            </p>
+
+            {muted.length > 0 && (
+              <div className="notice warn" style={{ marginTop: 10 }}>
+                Muted right now:{' '}
+                {muted.map((m) => m.key.replace(/^(container|project):/, '')).join(', ')}.
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="card">
@@ -352,7 +384,7 @@ export default function Settings() {
             <table style={{ minWidth: 0 }}>
               <tbody>
                 {alertLog.slice(0, 25).map((a, i) => (
-                  <tr key={i}>
+                  <tr key={i} style={a.muted ? { opacity: 0.7 } : undefined}>
                     <td className="dim" style={{ width: 160 }}>{new Date(a.at).toLocaleString()}</td>
                     <td className="name">{a.title}</td>
                     <td className="dim" style={{ whiteSpace: 'pre-wrap' }}>{a.message}</td>

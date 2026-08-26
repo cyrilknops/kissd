@@ -8,6 +8,7 @@ import path from 'node:path';
 import * as settingsStore from './config.js';
 import * as dockerApi from './docker.js';
 import * as host from './host.js';
+import * as mute from './mute.js';
 import { send, isConfigured } from './ntfy.js';
 
 const DATA_DIR = process.env.DATA_DIR || '/data';
@@ -27,6 +28,12 @@ function record(entry) {
 
 export function recentAlerts() {
   return log;
+}
+
+// Mutes are started by whoever runs compose, not by the watcher, so the log
+// entry that explains a quiet spell has to come from there too.
+export function noteMute(title, message) {
+  record({ title, message, priority: 'min', muted: true });
 }
 
 function loadState() {
@@ -100,6 +107,12 @@ async function checkContainers(settings, containers) {
     const prev = state.containers[c.name];
     const now = { state: c.state, health: c.health };
 
+    // Mid-update, a container stopping is the point of the exercise. Skipping
+    // the state write as well as the alert is deliberate: the pre-update state
+    // stays the baseline, so a service that never comes back is still reported
+    // once the mute lifts, rather than being silently accepted as the new normal.
+    if (mute.isMuted(mute.keysFor(c))) continue;
+
     // First run just establishes a baseline — no alert storm on startup.
     if (baselineTaken && prev) {
       if (cfg.containerDown && prev.state === 'running' && c.state !== 'running') {
@@ -151,6 +164,17 @@ async function checkContainers(settings, containers) {
     const cooldownMs = (cfg.cooldownSeconds || 86400) * 1000;
 
     for (const c of containers.filter((x) => x.state === 'running')) {
+      // A recreated container starts its restart count from zero, so the
+      // samples taken either side of an update are not comparable. Drop the
+      // window and start counting again from the new container.
+      if (mute.isMuted(mute.keysFor(c))) {
+        if (state.restarts[c.name]?.length) {
+          state.restarts[c.name] = [];
+          dirty = true;
+        }
+        continue;
+      }
+
       let info;
       try {
         info = await dockerApi.inspect(c.id);

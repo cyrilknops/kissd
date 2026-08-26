@@ -50,6 +50,7 @@ export const api = {
   saveSettings: (patch) => req('PUT', '/api/settings', patch),
   testNtfy: (ntfy) => req('POST', '/api/settings/ntfy/test', { ntfy }),
   testRegistries: (registries) => req('POST', '/api/settings/registries/test', { registries }),
+  // Returns { log, muted }: what was sent, and which scopes are muted right now.
   alerts: () => req('GET', '/api/alerts'),
 };
 
