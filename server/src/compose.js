@@ -6,7 +6,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { docker, composeInfo, updateSelfDetached, SELF_NAME } from './docker.js';
+import { docker, composeInfo, updateSelfDetached, resetSelfDetached, SELF_NAME } from './docker.js';
 import * as registry from './registry.js';
 
 const DATA_DIR = process.env.DATA_DIR || '/data';
@@ -204,6 +204,30 @@ export async function update(projectName, onData) {
 
   return streamSteps(project, [
     composeArgs(project, 'pull', ['--ignore-pull-failures']),
+    composeArgs(project, 'up', ['-d']),
+  ], onData);
+}
+
+// Tears the project down and brings it straight back up: containers and the
+// project network are recreated from the compose file as it stands on disk,
+// without pulling anything. `down` is deliberately run without -v — named
+// volumes, and everything in them, survive a reset.
+export async function reset(projectName, onData) {
+  const project = await findProject(projectName);
+
+  if (project.hasSelf) {
+    onData(`This project runs kissd itself (${SELF_NAME}).\n`);
+    onData('Handing the compose run to the host so it survives this container going away.\n');
+    onData('Recreating every container in place rather than taking the project down first:\n');
+    onData('a detached run cannot be relied on to outlive kissd, and a half-finished\n');
+    onData('`down` would leave the whole project stopped.\n');
+    onData('The panel will drop out for a few seconds — reload once it returns.\n');
+    await resetSelfDetached(project);
+    return DETACHED;
+  }
+
+  return streamSteps(project, [
+    composeArgs(project, 'down'),
     composeArgs(project, 'up', ['-d']),
   ], onData);
 }

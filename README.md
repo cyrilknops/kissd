@@ -60,9 +60,9 @@ about how your host is arranged, and gets out of the way.
 |---|---|
 | 📦 **Containers** | Every container on the host, as cards grouped by compose project, with live CPU, memory, health, ports and uptime |
 | 🔍 **Detail page** | Per-container stats, mounts, networks, published ports, restart policy, failing healthcheck output, and live logs |
-| 🎛️ **Actions** | Start, stop, restart, and update via `docker compose pull && up -d`, resolved from each container's own compose labels — one service, or a whole project at once from its group header |
+| 🎛️ **Actions** | Start, stop, restart, and update via `docker compose pull && up -d`, resolved from each container's own compose labels — one service, or a whole project at once from its group header. **Reset all** recreates a whole project with `down && up -d`, without pulling |
 | 📈 **Host metrics** | CPU, load, memory, swap, network throughput, per-mount disk usage |
-| 🔔 **Alerts** | ntfy push when a container stops, goes unhealthy, or enters a restart loop — plus disk, memory and load thresholds |
+| 🔔 **Alerts** | ntfy push when a container stops, goes unhealthy, or enters a restart loop — plus disk, memory and load thresholds. Muted automatically for whatever is mid-update |
 | 🔑 **Registries** | Private registry logins in Settings, applied to every `docker` the panel runs — no `docker login` on the host |
 | 📝 **Compose** | View and edit the compose file behind any project, with validation, automatic backups and one-click apply |
 | 🧹 **Maintenance** | Disk usage breakdown and per-target pruning, with named volumes handled one at a time |
@@ -200,7 +200,7 @@ kissd joins an external network named `proxy-tier` by default. Change that in
 | `NTFY_URL` / `NTFY_TOPIC` / `NTFY_TOKEN` | Optional first-run seed for notifications. |
 
 Everything else — ntfy server, auth mode, registry logins, alert toggles,
-thresholds, cooldown, hysteresis — lives in **Settings** and is stored in
+thresholds, cooldown, hysteresis, update muting — lives in **Settings** and is stored in
 `data/settings.json` (mode 0600). Changes apply immediately, with no restart.
 
 🔐 ntfy and registry credentials never travel back to the browser. The UI shows
@@ -241,6 +241,56 @@ Restart loops are counted over a **rolling window** (default: 3 restarts within
 60 minutes). Comparing only against the previous poll would miss a slow loop — a
 container restarting every few minutes never shows a spike between two
 30-second samples, yet it is still looping.
+
+### 🔕 Muted while updating
+
+An update, a compose apply and a reset all stop and recreate containers *on
+purpose*, so pushing "container stopped" and then "container is back up" for
+each one is noise about something you are already watching on screen. kissd
+mutes alerts for exactly the scope being worked on — one container for a
+container update, one project for a project update, apply or reset — for as
+long as the compose run takes, plus a **settle grace** (default 180 s) for the
+new container to pass its healthcheck.
+
+The mute is deliberately narrow in two ways:
+
+- **Only the scope being touched.** Every other container on the host still
+  alerts normally throughout.
+- **The pre-update state stays the baseline.** A service that goes down for an
+  update and never comes back is still reported once the mute lifts — the
+  silence covers the update, not its outcome.
+
+Mutes carry absolute deadlines and are stored in `data/alert-mutes.json`, so
+they survive kissd replacing itself: the detached self-update gets a fixed
+five-minute window that the new container picks up where the old one left off.
+A run whose process dies mid-update is worth only its grace period, never the
+full window, so nothing can silence the host indefinitely.
+
+Both the toggle and the grace period live in **Settings › Container alerts**,
+which also lists whatever is muted right now.
+
+## ♻️ Reset
+
+**Update** pulls new images and recreates what changed. **Reset** — next to it
+in the Containers group header and on the Compose page — runs `docker compose
+down` followed by `docker compose up -d` for the whole project instead: every
+container is rebuilt from the compose file exactly as it stands on disk, using
+the images you already have. It is the button for a project that has drifted
+into a bad state, or one whose compose file you just edited more deeply than
+`up -d` alone will reconcile.
+
+`down` is run **without `-v`**, so named volumes and everything in them survive.
+It still takes the whole project offline for the length of the run, so it asks
+for confirmation first.
+
+The project containing kissd itself is the one exception. Like an update, the
+run is handed to the host — but it recreates each container in place
+(`up -d --force-recreate`) rather than tearing the project down first. A
+detached run cannot be relied on to outlive the container that spawned it, and
+a `down` that dies as kissd goes away would leave every service in the project
+stopped; a single recreate can at worst strand the one container it was working
+on, which is the exposure the self-update already carries. The confirmation
+dialog says so when it applies.
 
 ## 🧹 Pruning
 

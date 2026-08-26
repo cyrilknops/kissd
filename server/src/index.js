@@ -14,6 +14,7 @@ import * as system from './system.js';
 import * as claude from './claude.js';
 import * as compose from './compose.js';
 import * as registry from './registry.js';
+import * as mute from './mute.js';
 import { send as ntfySend } from './ntfy.js';
 import { handleTerminal, handleLogs } from './terminal.js';
 
@@ -72,6 +73,26 @@ app.get('/api/host', auth.requireAuth, async (req, res) => {
   }
 });
 
+// --- alert muting ----------------------------------------------------------
+
+// A compose run stops and recreates containers on purpose, so the alert watcher
+// is told to hold its tongue for exactly the scope being touched — one
+// container, or one project — while it runs. The returned function ends the
+// mute (after a grace period, so a freshly recreated container has time to pass
+// its healthcheck) and must be called however the request ends.
+function muteWhile(keys, scope, reason) {
+  // begin() is still called with muting switched off — it is inert then, and
+  // skipping it would leave a stale hold behind if the setting flips mid-run.
+  // The log entry is not: an alert that was never held back needs no excuse.
+  if (mute.isEnabled()) {
+    alerts.noteMute(
+      `Alerts muted · ${scope}`,
+      `${reason} Container alerts for ${scope} are held until it finishes, plus the grace period.`,
+    );
+  }
+  return mute.begin(keys);
+}
+
 // --- containers ------------------------------------------------------------
 
 app.get('/api/containers', auth.requireAuth, async (req, res) => {
@@ -117,17 +138,26 @@ app.post('/api/containers/:id/update', auth.requireAuth, async (req, res) => {
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('X-Accel-Buffering', 'no');
 
-    if (name === dockerApi.SELF_NAME) {
-      res.write('Updating kissd itself.\n');
-      res.write('Handing the compose run to the host so it survives this container being replaced.\n');
-      res.write('The panel will drop out for a few seconds — reload once it returns.\n');
-      await dockerApi.updateSelfDetached(compose);
-      return res.end();
-    }
+    const keys = [mute.containerKey(name)];
+    const release = muteWhile(keys, name, 'An update is running.');
+    try {
+      if (name === dockerApi.SELF_NAME) {
+        res.write('Updating kissd itself.\n');
+        res.write('Handing the compose run to the host so it survives this container being replaced.\n');
+        res.write('The panel will drop out for a few seconds — reload once it returns.\n');
+        await dockerApi.updateSelfDetached(compose);
+        // Nothing here ever sees a detached run finish — and this process is
+        // about to be replaced — so the mute gets a fixed window on disk.
+        mute.muteFor(keys, mute.DETACHED_SECONDS);
+        return res.end();
+      }
 
-    const code = await dockerApi.update(compose, (chunk) => res.write(chunk));
-    res.write(code === 0 ? '\nUpdate complete.\n' : `\nUpdate failed (exit ${code}).\n`);
-    return res.end();
+      const code = await dockerApi.update(compose, (chunk) => res.write(chunk));
+      res.write(code === 0 ? '\nUpdate complete.\n' : `\nUpdate failed (exit ${code}).\n`);
+      return res.end();
+    } finally {
+      release();
+    }
   } catch (err) {
     if (res.headersSent) {
       res.write(`\nError: ${err.message}\n`);
@@ -187,6 +217,35 @@ app.post('/api/system/volumes/remove', auth.requireElevated, async (req, res) =>
 
 // --- compose files ---------------------------------------------------------
 
+// Update and reset differ only in the compose steps they run: both stream
+// their output, both mute the project's alerts while they work, and both may
+// hand the run to the host when the project contains kissd itself.
+async function streamProjectRun(req, res, run, label, reason) {
+  const name = String(req.body?.project || '');
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('X-Accel-Buffering', 'no');
+  const keys = [mute.projectKey(name)];
+  const release = muteWhile(keys, name, reason);
+  try {
+    const code = await run(name, (chunk) => res.write(chunk));
+    if (code === compose.DETACHED) {
+      // A detached run has no exit code to report, and the handoff lines
+      // already said what happens next — claiming completion here would
+      // contradict them. Nothing will see it finish either, so the mute is
+      // given a fixed window on disk that outlives this process.
+      mute.muteFor(keys, mute.DETACHED_SECONDS);
+    } else {
+      res.write(code === 0 ? `\n${label} complete.\n` : `\n${label} failed (exit ${code}).\n`);
+    }
+  } catch (err) {
+    res.write(`\nError: ${err.message}\n`);
+  } finally {
+    release();
+  }
+  res.end();
+}
+
 app.get('/api/compose', auth.requireAuth, async (req, res) => {
   try {
     res.json(await compose.projects());
@@ -215,36 +274,30 @@ app.put('/api/compose/file', auth.requireAuth, async (req, res) => {
 });
 
 app.post('/api/compose/apply', auth.requireAuth, async (req, res) => {
-  const { project } = req.body || {};
+  const name = String(req.body?.project || '');
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('X-Accel-Buffering', 'no');
+  const release = muteWhile([mute.projectKey(name)], name, 'A compose apply is running.');
   try {
-    const code = await compose.apply(String(project || ''), (chunk) => res.write(chunk));
+    const code = await compose.apply(name, (chunk) => res.write(chunk));
     res.write(code === 0 ? '\nApplied.\n' : `\nFailed (exit ${code}).\n`);
   } catch (err) {
     res.write(`\nError: ${err.message}\n`);
+  } finally {
+    release();
   }
   res.end();
 });
 
 // Pull + recreate every service in a project, streamed like a single update.
 app.post('/api/compose/update', auth.requireAuth, async (req, res) => {
-  const { project } = req.body || {};
-  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('X-Accel-Buffering', 'no');
-  try {
-    const code = await compose.update(String(project || ''), (chunk) => res.write(chunk));
-    // A detached run has no exit code to report, and the handoff lines already
-    // said what happens next — claiming completion here would contradict them.
-    if (code !== compose.DETACHED) {
-      res.write(code === 0 ? '\nUpdate complete.\n' : `\nUpdate failed (exit ${code}).\n`);
-    }
-  } catch (err) {
-    res.write(`\nError: ${err.message}\n`);
-  }
-  res.end();
+  await streamProjectRun(req, res, compose.update, 'Update', 'An update is running.');
+});
+
+// Tear the project down and bring it back up, without pulling. Volumes stay.
+app.post('/api/compose/reset', auth.requireAuth, async (req, res) => {
+  await streamProjectRun(req, res, compose.reset, 'Reset', 'A reset is running.');
 });
 
 app.get('/api/compose/backups', auth.requireAuth, async (req, res) => {
@@ -348,7 +401,7 @@ app.post('/api/settings/ntfy/test', auth.requireAuth, async (req, res) => {
 });
 
 app.get('/api/alerts', auth.requireAuth, (req, res) => {
-  res.json(alerts.recentAlerts());
+  res.json({ log: alerts.recentAlerts(), muted: mute.active() });
 });
 
 // --- static frontend -------------------------------------------------------

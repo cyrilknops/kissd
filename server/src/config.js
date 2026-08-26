@@ -30,6 +30,11 @@ export const DEFAULTS = {
     containerDown: true,
     containerUnhealthy: true,
     restartLoop: true,
+    // An update stops and recreates containers on purpose. Alerts for the
+    // scope being updated are held back while the compose run is in flight,
+    // plus a grace period for the new container to settle.
+    muteDuringUpdates: true,
+    muteGraceSeconds: 180,
     // A slow loop (a few restarts an hour) never shows up as a spike between
     // two polls, so restarts are counted over a rolling window instead.
     restartThreshold: 3,
