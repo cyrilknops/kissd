@@ -319,26 +319,21 @@ else
 fi
 `;
 
-// A reset is always project-wide, so the service name is ignored here.
-//
-// This is `up -d --force-recreate` rather than the `down && up -d` a reset runs
-// everywhere else, and deliberately so: this run recreates the very container
-// it was spawned from, and a detached run that dies as kissd goes away leaves
-// the project wherever the last command left it. One command that recreates
-// each container in turn can at worst strand the one it was working on — the
-// same exposure the self-update already has. `down` first would put every
-// service in the project on the wrong side of that window.
-const SELF_RESET_SH = `
+// A restart is always project-wide, so the service name is ignored here.
+// Nothing is pulled, removed or recreated — the containers that are there stop
+// and start again — but restarting the project means restarting kissd, which
+// kills the request that asked for it, so this still goes to the host.
+const SELF_RESTART_SH = `
 sleep 1
 if [ -n "$1" ]; then DOCKER_CONFIG=$1; export DOCKER_CONFIG; fi
 cd "$2" || exit 1
 shift 3
-docker compose "$@" up -d --force-recreate
+docker compose "$@" restart
 `;
 
-// Replacing or tearing down kissd itself would kill the process mid-request, so
+// Replacing or restarting kissd itself would kill the process mid-request, so
 // the compose run is handed to the host (via PID 1's namespaces) and detached —
-// it outlives this container's replacement.
+// it outlives this container going away.
 function runSelfDetached(script, info, configDir) {
   const child = spawn(
     'nsenter',
@@ -364,7 +359,7 @@ export async function updateSelfDetached(info) {
   runSelfDetached(SELF_UPDATE_SH, info, await selfConfigDir());
 }
 
-// Recreates every container in the whole project, detached.
-export async function resetSelfDetached(info) {
-  runSelfDetached(SELF_RESET_SH, info, await selfConfigDir());
+// `docker compose restart` for the whole project, detached.
+export async function restartSelfDetached(info) {
+  runSelfDetached(SELF_RESTART_SH, info, await selfConfigDir());
 }

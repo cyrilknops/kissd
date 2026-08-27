@@ -262,8 +262,8 @@ export default function Settings() {
             )}
 
             <p className="hint" style={{ marginTop: 10 }}>
-              An update, an apply or a reset stops and recreates containers on purpose, so no
-              push goes out for the container or project being worked on while the run is in
+              An update, an apply or a restart takes containers down on purpose, so no push
+              goes out for the container or project being worked on while the run is in
               flight. The pre-update state stays the baseline, so a service that never comes
               back is still reported once the mute lifts.
             </p>

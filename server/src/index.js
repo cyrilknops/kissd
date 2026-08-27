@@ -217,7 +217,7 @@ app.post('/api/system/volumes/remove', auth.requireElevated, async (req, res) =>
 
 // --- compose files ---------------------------------------------------------
 
-// Update and reset differ only in the compose steps they run: both stream
+// Update and restart differ only in the compose steps they run: both stream
 // their output, both mute the project's alerts while they work, and both may
 // hand the run to the host when the project contains kissd itself.
 async function streamProjectRun(req, res, run, label, reason) {
@@ -295,9 +295,9 @@ app.post('/api/compose/update', auth.requireAuth, async (req, res) => {
   await streamProjectRun(req, res, compose.update, 'Update', 'An update is running.');
 });
 
-// Tear the project down and bring it back up, without pulling. Volumes stay.
-app.post('/api/compose/reset', auth.requireAuth, async (req, res) => {
-  await streamProjectRun(req, res, compose.reset, 'Reset', 'A reset is running.');
+// Stop and start every container in the project. Nothing is pulled or recreated.
+app.post('/api/compose/restart', auth.requireAuth, async (req, res) => {
+  await streamProjectRun(req, res, compose.restart, 'Restart', 'A restart is running.');
 });
 
 app.get('/api/compose/backups', auth.requireAuth, async (req, res) => {
