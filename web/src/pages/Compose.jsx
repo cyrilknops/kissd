@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api, bytes } from '../api';
 import StreamModal from '../components/StreamModal';
-import ConfirmReset from '../components/ConfirmReset';
+import ConfirmRestart from '../components/ConfirmRestart';
 
 export default function Compose() {
   const [params, setParams] = useSearchParams();
@@ -13,8 +13,8 @@ export default function Compose() {
   const [busy, setBusy] = useState(false);
   const [applying, setApplying] = useState(null);
   const [updating, setUpdating] = useState(null);
-  const [resetting, setResetting] = useState(null);   // project awaiting confirmation
-  const [resettingRun, setResettingRun] = useState(null);
+  const [restarting, setRestarting] = useState(null);   // project awaiting confirmation
+  const [restartingRun, setRestartingRun] = useState(null);
   const [history, setHistory] = useState([]);
   const taRef = useRef(null);
 
@@ -147,11 +147,11 @@ export default function Compose() {
                     Update
                   </button>
                   <button
-                    className="btn xs danger"
-                    title={`Take ${p.project} down and bring it straight back up, without pulling`}
-                    onClick={() => setResetting(p)}
+                    className="btn xs"
+                    title={`Stop and start every container in ${p.project}, without pulling or recreating`}
+                    onClick={() => setRestarting(p)}
                   >
-                    Reset
+                    Restart
                   </button>
                 </div>
               </div>
@@ -244,22 +244,22 @@ export default function Compose() {
         />
       )}
 
-      {resetting && (
-        <ConfirmReset
-          project={resetting.project}
-          services={resetting.services.length}
-          hasSelf={resetting.hasSelf}
-          onCancel={() => setResetting(null)}
-          onConfirm={() => { setResettingRun(resetting.project); setResetting(null); }}
+      {restarting && (
+        <ConfirmRestart
+          project={restarting.project}
+          services={restarting.services.length}
+          hasSelf={restarting.hasSelf}
+          onCancel={() => setRestarting(null)}
+          onConfirm={() => { setRestartingRun(restarting.project); setRestarting(null); }}
         />
       )}
 
-      {resettingRun && (
+      {restartingRun && (
         <StreamModal
-          title={`docker compose down && up -d · ${resettingRun}`}
-          url="/api/compose/reset"
-          body={{ project: resettingRun }}
-          onClose={() => setResettingRun(null)}
+          title={`docker compose restart · ${restartingRun}`}
+          url="/api/compose/restart"
+          body={{ project: restartingRun }}
+          onClose={() => setRestartingRun(null)}
         />
       )}
     </>

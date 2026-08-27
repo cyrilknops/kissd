@@ -60,7 +60,7 @@ about how your host is arranged, and gets out of the way.
 |---|---|
 | 📦 **Containers** | Every container on the host, as cards grouped by compose project, with live CPU, memory, health, ports and uptime |
 | 🔍 **Detail page** | Per-container stats, mounts, networks, published ports, restart policy, failing healthcheck output, and live logs |
-| 🎛️ **Actions** | Start, stop, restart, and update via `docker compose pull && up -d`, resolved from each container's own compose labels — one service, or a whole project at once from its group header. **Reset all** recreates a whole project with `down && up -d`, without pulling |
+| 🎛️ **Actions** | Start, stop, restart, and update via `docker compose pull && up -d`, resolved from each container's own compose labels — one service, or a whole project at once from its group header. **Restart all** bounces a whole project with `docker compose restart` |
 | 📈 **Host metrics** | CPU, load, memory, swap, network throughput, per-mount disk usage |
 | 🔔 **Alerts** | ntfy push when a container stops, goes unhealthy, or enters a restart loop — plus disk, memory and load thresholds. Muted automatically for whatever is mid-update |
 | 🔑 **Registries** | Private registry logins in Settings, applied to every `docker` the panel runs — no `docker login` on the host |
@@ -244,13 +244,13 @@ container restarting every few minutes never shows a spike between two
 
 ### 🔕 Muted while updating
 
-An update, a compose apply and a reset all stop and recreate containers *on
-purpose*, so pushing "container stopped" and then "container is back up" for
-each one is noise about something you are already watching on screen. kissd
-mutes alerts for exactly the scope being worked on — one container for a
-container update, one project for a project update, apply or reset — for as
-long as the compose run takes, plus a **settle grace** (default 180 s) for the
-new container to pass its healthcheck.
+An update, a compose apply and a restart all take containers down *on purpose*,
+so pushing "container stopped" and then "container is back up" for each one is
+noise about something you are already watching on screen. kissd mutes alerts
+for exactly the scope being worked on — one container for a container update,
+one project for a project update, apply or restart — for as long as the compose
+run takes, plus a **settle grace** (default 180 s) for the container to come
+back and pass its healthcheck.
 
 The mute is deliberately narrow in two ways:
 
@@ -269,28 +269,27 @@ full window, so nothing can silence the host indefinitely.
 Both the toggle and the grace period live in **Settings › Container alerts**,
 which also lists whatever is muted right now.
 
-## ♻️ Reset
+## 🔁 Restart all
 
-**Update** pulls new images and recreates what changed. **Reset** — next to it
-in the Containers group header and on the Compose page — runs `docker compose
-down` followed by `docker compose up -d` for the whole project instead: every
-container is rebuilt from the compose file exactly as it stands on disk, using
-the images you already have. It is the button for a project that has drifted
-into a bad state, or one whose compose file you just edited more deeply than
-`up -d` alone will reconcile.
+The container cards have had a **Restart** button all along; **Restart all** is
+the same thing for a whole compose project. Next to **Update all** in the
+Containers group header, and next to **Update** on the Compose page, it runs
+`docker compose restart`: every container in the project stops and starts
+again, keeping its image, its volumes and its identity.
 
-`down` is run **without `-v`**, so named volumes and everything in them survive.
-It still takes the whole project offline for the length of the run, so it asks
-for confirmation first.
+Nothing is pulled, removed or recreated — which is exactly the point, and also
+the one thing to know about it. A compose file edited since these containers
+were created is **not** picked up by a restart; **Save & apply** and **Update**
+are the buttons that reconcile a container with its file. Restart is for a
+service that has wedged itself and needs turning off and on again.
 
-The project containing kissd itself is the one exception. Like an update, the
-run is handed to the host — but it recreates each container in place
-(`up -d --force-recreate`) rather than tearing the project down first. A
-detached run cannot be relied on to outlive the container that spawned it, and
-a `down` that dies as kissd goes away would leave every service in the project
-stopped; a single recreate can at worst strand the one container it was working
-on, which is the exposure the self-update already carries. The confirmation
-dialog says so when it applies.
+One click bounces a whole stack, so it asks for confirmation first — unlike the
+per-container Restart button, which only ever affects the card it sits on.
+
+The project containing kissd itself is handed to the host, the same way an
+update of kissd is: restarting the project restarts kissd, which would
+otherwise kill the request that asked for it. The panel drops out for a few
+seconds and comes back.
 
 ## 🧹 Pruning
 
