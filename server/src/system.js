@@ -3,8 +3,8 @@
 // Deliberately NOT offering a blanket `docker volume prune`: a named volume
 // counts as "dangling" whenever its container merely isn't running, so a bulk
 // prune silently destroys real data (on this host it would have taken out
-// mail-iwg-it_mongodb_data). Volumes are listed by name and removed one at a
-// time, with the caller naming the exact volume.
+// mail-iwg-it_mongodb_data). In-use volumes are listed read-only. Unused
+// volumes can be removed one at a time, with the caller naming the exact one.
 import { docker } from './docker.js';
 
 export async function usage() {
@@ -22,6 +22,7 @@ export async function usage() {
   const danglingImages = images.filter((i) => !i.RepoTags || i.RepoTags.length === 0
     || i.RepoTags[0] === '<none>:<none>');
   const stoppedContainers = containers.filter((c) => c.State !== 'running');
+  const usedVolumes = volumes.filter((v) => (v.UsageData?.RefCount ?? 0) > 0);
   const unusedVolumes = volumes.filter((v) => (v.UsageData?.RefCount ?? 0) <= 0);
   const unusedCache = cache.filter((c) => !c.InUse);
 
@@ -34,6 +35,16 @@ export async function usage() {
   // when several unused images share it.
   const uniqueSize = (i) => Math.max(0, i.Size - Math.max(0, i.SharedSize || 0));
   const layersSize = df.LayersSize || sum(images, (i) => i.Size);
+  const volumeSummary = (v) => ({
+    name: v.Name,
+    size: v.UsageData?.Size ?? 0,
+    driver: v.Driver,
+    createdAt: v.CreatedAt || null,
+    // Compose-created volumes carry their project, which is the strongest
+    // hint that a volume holds real application data.
+    project: v.Labels?.['com.docker.compose.project'] || null,
+  });
+  const byLargest = (a, b) => b.size - a.size;
 
   return {
     images: {
@@ -58,19 +69,12 @@ export async function usage() {
       reclaimable: sum(unusedCache.filter((c) => !c.Shared), (c) => c.Size),
       unusedCount: unusedCache.filter((c) => !c.Shared).length,
     },
-    // Full detail, because the user has to make the call per volume.
+    // Full detail for the maintenance page's per-volume tables.
     volumes: {
       total: volumes.length,
       size: sum(volumes, (v) => v.UsageData?.Size),
-      unused: unusedVolumes.map((v) => ({
-        name: v.Name,
-        size: v.UsageData?.Size ?? 0,
-        driver: v.Driver,
-        createdAt: v.CreatedAt || null,
-        // Compose-created volumes carry their project, which is the strongest
-        // hint that a volume holds real application data.
-        project: v.Labels?.['com.docker.compose.project'] || null,
-      })).sort((a, b) => b.size - a.size),
+      used: usedVolumes.map(volumeSummary).sort(byLargest),
+      unused: unusedVolumes.map(volumeSummary).sort(byLargest),
     },
     at: Date.now(),
   };
