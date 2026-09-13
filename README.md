@@ -65,7 +65,7 @@ about how your host is arranged, and gets out of the way.
 | 🔔 **Alerts** | ntfy push when a container stops, goes unhealthy, or enters a restart loop — plus disk, memory and load thresholds. Muted automatically for whatever is mid-update |
 | 🔑 **Registries** | Private registry logins in Settings, applied to every `docker` the panel runs — no `docker login` on the host |
 | 📝 **Compose** | View and edit the compose file behind any project, with validation, automatic backups and one-click apply |
-| 🧹 **Maintenance** | Disk usage breakdown and per-target pruning, with named volumes handled one at a time |
+| 🧹 **Maintenance** | Disk usage breakdown and per-target pruning, with in-use volumes listed read-only and unused volumes handled one at a time |
 | 💻 **Terminals** | A shell in any container, a root shell on the host, and Claude Code — all in the browser |
 | 📱 **Phone-ready** | The same panel on a phone: the sidebar becomes a drawer, dialogs become sheets, and it installs to the home screen as a PWA |
 
@@ -303,10 +303,11 @@ will be freed.
 > for, it would have taken out a 210 MB MongoDB volume whose container simply
 > wasn't running that day.
 
-kissd instead lists unused volumes by name, size and compose project, and
-deletes them one at a time — each requiring your password *and* the volume name
-typed out. The refcount is re-checked at the moment of deletion, so a volume
-that got attached in the meantime is refused.
+kissd lists volumes that are in use by name, size and compose project without
+offering a delete action. Unused volumes are listed separately and can be
+deleted one at a time — each requiring your password *and* the volume name typed
+out. The refcount is re-checked at the moment of deletion, so a volume that got
+attached in the meantime is refused.
 
 Reported figures are what a prune would **actually free**, which is not always
 what `docker system df` prints in its RECLAIMABLE column — that number counts

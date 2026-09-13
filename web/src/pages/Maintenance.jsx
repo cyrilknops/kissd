@@ -168,6 +168,7 @@ export default function Maintenance() {
   }
 
   const totalReclaimable = df.images.reclaimable + df.containers.reclaimable + df.buildCache.reclaimable;
+  const usedVolumes = df.volumes.used || [];
 
   return (
     <>
@@ -231,6 +232,33 @@ export default function Maintenance() {
             );
           })}
         </div>
+      </div>
+
+      <div className="card" style={{ marginTop: 16 }}>
+        <h3>Volumes in use</h3>
+        <p className="dim" style={{ marginTop: 0 }}>
+          Volumes referenced by one or more containers. This list is read-only.
+        </p>
+        {usedVolumes.length ? (
+          <div className="table-wrap" style={{ border: 0 }}>
+            <table style={{ minWidth: 0 }}>
+              <thead>
+                <tr><th>Volume</th><th>Project</th><th>Size</th></tr>
+              </thead>
+              <tbody>
+                {usedVolumes.map((v) => (
+                  <tr key={v.name}>
+                    <td className="mono" style={{ maxWidth: 340, overflow: 'hidden', textOverflow: 'ellipsis' }}>{v.name}</td>
+                    <td className="dim">{v.project || <span className="dim">—</span>}</td>
+                    <td className="dim">{bytes(v.size)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="dim" style={{ margin: 0 }}>No volumes are currently in use.</p>
+        )}
       </div>
 
       <div className="card" style={{ marginTop: 16 }}>
