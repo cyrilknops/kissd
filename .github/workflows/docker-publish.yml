@@ -75,6 +75,7 @@ jobs:
 
       - uses: docker/build-push-action@v6
         with:
+          pull: true
           context: .
           platforms: linux/amd64
           push: ${{ env.PUBLISH == 'true' }}

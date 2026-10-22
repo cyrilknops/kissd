@@ -1,5 +1,5 @@
 # ---- frontend build -------------------------------------------------------
-FROM node:22-alpine AS web
+FROM node:22.23.4-alpine AS web
 WORKDIR /web
 COPY web/package.json ./
 RUN npm install
@@ -7,14 +7,14 @@ COPY web/ ./
 RUN npm run build
 
 # ---- server dependencies (node-pty needs a toolchain) ---------------------
-FROM node:22-alpine AS deps
+FROM node:22.23.4-alpine AS deps
 RUN apk add --no-cache python3 make g++
 WORKDIR /app
 COPY server/package.json ./
 RUN npm install --omit=dev
 
 # ---- runtime --------------------------------------------------------------
-FROM node:22-alpine
+FROM node:22.23.4-alpine
 
 # docker-cli + compose: used to update containers via their compose project.
 # util-linux: provides nsenter, used for the host shell.
