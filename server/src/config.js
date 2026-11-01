@@ -3,11 +3,13 @@
 // in .env, so ntfy can be reconfigured without a redeploy.
 import fs from 'node:fs';
 import path from 'node:path';
+import { validateMetricsSettings } from './metrics-store.js';
 
 const DATA_DIR = process.env.DATA_DIR || '/data';
 const FILE = path.join(DATA_DIR, 'settings.json');
 
 export const DEFAULTS = {
+  metrics: { retentionDays: 7 },
   ntfy: {
     url: '',
     topic: '',
@@ -153,7 +155,9 @@ function mergeRegistries(current, incoming) {
 // __CLEAR__ (sent by the UI's Clear button) wipes it.
 export function applyPatch(patch) {
   const current = load();
+  const metrics = Object.hasOwn(patch, 'metrics') ? validateMetricsSettings(patch.metrics) : current.metrics;
   const merged = deepMerge(current, patch);
+  merged.metrics = metrics;
   for (const [section, field] of SECRET_FIELDS) {
     const incoming = patch?.[section]?.[field];
     if (incoming === '__CLEAR__') merged[section][field] = '';

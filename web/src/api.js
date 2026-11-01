@@ -28,6 +28,7 @@ export const api = {
   elevate: (password) => req('POST', '/api/elevate', { password }),
 
   host: () => req('GET', '/api/host'),
+  metrics: (target, range) => req('GET', `/api/metrics?${new URLSearchParams({ target, range })}`),
   containers: () => req('GET', '/api/containers'),
   container: (id) => req('GET', `/api/containers/${encodeURIComponent(id)}`),
   containerAction: (id, action) => req('POST', `/api/containers/${id}/${action}`),

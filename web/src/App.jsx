@@ -10,9 +10,11 @@ import Terminals from './pages/Terminals';
 import Compose from './pages/Compose';
 import Maintenance from './pages/Maintenance';
 import Settings from './pages/Settings';
+import Metrics from './pages/Metrics';
 
 const NAV = [
   { to: '/', label: 'Overview', icon: '◎', end: true },
+  { to: '/metrics', label: 'Metrics', icon: '↗' },
   { to: '/containers', label: 'Containers', icon: '▦' },
   { to: '/compose', label: 'Compose', icon: '≡' },
   { to: '/terminal', label: 'Terminal', icon: '❯' },
@@ -161,6 +163,7 @@ export default function App() {
       <main className="main">
         <Routes>
           <Route path="/" element={<Overview containers={containers} />} />
+          <Route path="/metrics" element={<Metrics />} />
           <Route path="/containers" element={<Containers containers={containers} reload={reload} loaded={containersLoaded} />} />
           <Route path="/containers/:id" element={<ContainerDetail onOpenShell={setPendingShell} />} />
           {/* Rendered by the persistent block below, not here — routing to it

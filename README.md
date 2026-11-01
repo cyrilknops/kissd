@@ -60,6 +60,7 @@ about how your host is arranged, and gets out of the way.
 |---|---|
 | 📦 **Containers** | Every container on the host, as cards grouped by compose project, with live CPU, memory, health, ports and uptime |
 | 🔍 **Detail page** | Per-container stats, mounts, networks, published ports, restart policy, failing healthcheck output, and live logs |
+| 📈 **Metrics history** | Background collection, persistent host/container graphs, 1h–7d timeframes, downtime and health timelines, peaks and restart events |
 | 🎛️ **Actions** | Start, stop, restart, and update via `docker compose pull && up -d`, resolved from each container's own compose labels — one service, or a whole project at once from its group header. **Restart all** bounces a whole project with `docker compose restart` |
 | 📈 **Host metrics** | CPU, load, memory, swap, network throughput, per-mount disk usage |
 | 🔔 **Alerts** | ntfy push when a container stops, goes unhealthy, or enters a restart loop — plus disk, memory and load thresholds. Muted automatically for whatever is mid-update |
@@ -199,13 +200,45 @@ kissd joins an external network named `proxy-tier` by default. Change that in
 | `REPO_DIR` | Where your compose files live. Bind-mounted at the *same* path inside the container so `docker compose` resolves relative binds correctly. |
 | `NTFY_URL` / `NTFY_TOPIC` / `NTFY_TOKEN` | Optional first-run seed for notifications. |
 
-Everything else — ntfy server, auth mode, registry logins, alert toggles,
+Everything else — metrics retention, ntfy server, auth mode, registry logins, alert toggles,
 thresholds, cooldown, hysteresis, update muting — lives in **Settings** and is stored in
 `data/settings.json` (mode 0600). Changes apply immediately, with no restart.
 
 🔐 ntfy and registry credentials never travel back to the browser. The UI shows
 *set / not set* plus a four-character hint, and only overwrites a secret when
 you type a new one.
+
+### 📈 Metrics history
+
+**Metrics** shows the host or a container over **1h, 3h, 1d, 3d, or 7d** (7d by
+default). CPU, memory, network traffic, host load/disk/swap, container disk I/O
+and process counts are sampled every **30 seconds** in the server, even when
+no browser is open. Overview and container detail also show historical CPU
+and memory charts. Hover over a graph, or focus it and use the arrow keys,
+to inspect samples across the charts. Longer windows show bucket averages
+and peaks, preserving sampled spikes.
+
+History lives in **`data/metrics.sqlite`** on the existing data volume and
+survives panel restarts and updates. **Settings › Metrics history** controls
+retention: **7 days** by default, configurable from **1 to 90 days**. Lowering
+it deletes older samples when saved; expired data is also cleaned up hourly.
+Chart timeframes currently cover at most 7 days. More retention uses more disk.
+The server requires Node **22.13+**, including its built-in SQLite module;
+the supplied Docker image already meets this requirement.
+
+Container downtime and unhealthy periods are shaded on every chart and listed
+with timestamps and durations. Availability is running/healthy time divided
+by observed time; stopped, paused, restarting and intentionally stopped
+containers count as down. A starting healthcheck is unknown. Docker restart
+counter changes and replacements are listed as events; history follows the
+container's **name**, including when a compose update changes its ID.
+
+These are Docker observations, not external endpoint checks. Outages shorter
+than the sample interval can be missed. Time before collection began, missing
+observations and periods when kissd itself is offline remain **unknown**;
+they do not count as confirmed downtime or improve availability. Host coverage
+shows how much of the requested window was observed. Existing history cannot
+be reconstructed retroactively.
 
 ### 🔑 Private registries
 

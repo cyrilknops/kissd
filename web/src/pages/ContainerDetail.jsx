@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, streamUpdate, bytes, ago, duration } from '../api';
 import LogStream from '../components/LogStream';
+import HistoryPanel from '../components/HistoryPanel';
 
 function Row({ label, children, mono }) {
   if (children === null || children === undefined || children === '') return null;
@@ -170,6 +171,8 @@ export default function ContainerDetail({ onOpenShell }) {
           <div className="stat-sub">Policy: {c.restartPolicy}</div>
         </div>
       </div>
+
+      <HistoryPanel target={`container:${c.name}`} compact />
 
       {updateLog !== null && (
         <div className="card" style={{ marginTop: 16 }}>
