@@ -1,12 +1,13 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import { api } from '../api';
 
 function Num({ label, value, onChange, min, max, suffix, hint }) {
+  const id = useId();
   return (
     <div className="field">
-      <label>{label}</label>
+      <label htmlFor={id}>{label}</label>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <input type="number" value={value} min={min} max={max}
+        <input id={id} type="number" value={value} min={min} max={max}
                onChange={(e) => onChange(Number(e.target.value))} />
         {suffix && <span className="dim" style={{ whiteSpace: 'nowrap' }}>{suffix}</span>}
       </div>
@@ -69,7 +70,7 @@ export default function Settings() {
     try {
       const updated = await api.saveSettings(buildPatch());
       setS(updated);
-      setStatus({ type: 'ok', text: 'Settings saved. The alert watcher picked them up immediately.' });
+      setStatus({ type: 'ok', text: 'Settings saved. Changes apply immediately.' });
     } catch (err) {
       setStatus({ type: 'err', text: err.message });
     } finally {
@@ -112,7 +113,7 @@ export default function Settings() {
       <div className="page-head">
         <div>
           <h1>Settings</h1>
-          <p>Notifications and alert thresholds. Changes apply without a restart.</p>
+          <p>Metrics history, notifications and alert thresholds. Changes apply without a restart.</p>
         </div>
         <button className="btn primary" onClick={save} disabled={busy}>
           {busy ? 'Saving…' : 'Save changes'}
@@ -126,6 +127,13 @@ export default function Settings() {
           Alerts will still show up here, but nothing will be pushed.
         </div>
       )}
+
+      <div className="card" style={{ marginBottom: 16 }}>
+        <h3>Metrics history</h3>
+        <Num label="History retention" value={s.metrics.retentionDays} min={1} max={90} suffix="days"
+             onChange={(retentionDays) => patch('metrics', { retentionDays })}
+             hint="Default: 7 days. Collects host and container metrics every 30 seconds, even with the browser closed. Reducing retention deletes older history when saved. Longer retention uses more disk space. Graph timeframes cover up to 7 days." />
+      </div>
 
       <div className="grid cols-2">
         <div className="card">

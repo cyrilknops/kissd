@@ -1,8 +1,8 @@
 # ---- frontend build -------------------------------------------------------
 FROM node:22.23.4-alpine AS web
 WORKDIR /web
-COPY web/package.json ./
-RUN npm install
+COPY web/package.json web/package-lock.json ./
+RUN npm ci
 COPY web/ ./
 RUN npm run build
 
@@ -10,8 +10,12 @@ RUN npm run build
 FROM node:22.23.4-alpine AS deps
 RUN apk add --no-cache python3 make g++
 WORKDIR /app
-COPY server/package.json ./
-RUN npm install --omit=dev
+COPY server/package.json server/package-lock.json ./
+RUN npm ci --omit=dev
+COPY server/ ./
+# The existing PR image build also verifies history, collection, API auth and
+# retention on the exact runtime version before an image can be published.
+RUN npm run test:coverage
 
 # ---- runtime --------------------------------------------------------------
 FROM node:22.23.4-alpine

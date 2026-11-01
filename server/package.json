@@ -4,8 +4,11 @@
   "private": true,
   "type": "module",
   "main": "src/index.js",
+  "engines": { "node": ">=22.13.0" },
   "scripts": {
-    "start": "node src/index.js"
+    "start": "node src/index.js",
+    "test": "node --test test/*.test.js",
+    "test:coverage": "node --test --experimental-test-coverage --test-coverage-include='src/metrics-*.js' --test-coverage-lines=80 --test-coverage-branches=80 --test-coverage-functions=80 test/*.test.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

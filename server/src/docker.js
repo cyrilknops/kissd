@@ -42,7 +42,7 @@ export function composeInfo(labels = {}) {
 }
 
 export async function list() {
-  const raw = await docker.listContainers({ all: true });
+  const raw = await docker.listContainers({ all: true, abortSignal: AbortSignal.timeout(15_000) });
   return raw.map((c) => ({
     id: c.Id,
     name: shortName(c.Names),
@@ -63,7 +63,7 @@ export async function list() {
 // at concurrency 8 costs several seconds. Nothing may wait on that — the
 // container list is served from cache and the sample runs in the background.
 let statsCache = { at: 0, data: {} };
-let statsRefreshing = false;
+let statsRefreshing = null;
 const STATS_TTL = 5000;
 
 // CPU% is a rate, so it needs two samples. Docker zeroes precpu_stats on the
@@ -102,7 +102,12 @@ async function sampleStats(ids) {
   const data = {};
   await mapLimited(ids, 8, async (id) => {
     try {
-      const s = await docker.getContainer(id).stats({ stream: false });
+      const container = docker.getContainer(id);
+      const abortSignal = AbortSignal.timeout(15_000);
+      const [s, info] = await Promise.all([
+        container.stats({ stream: false, abortSignal }),
+        container.inspect({ abortSignal }).catch(() => null),
+      ]);
       const usage = s.memory_stats?.usage || 0;
       // `cache` is reclaimable and inflates usage; Docker's own CLI subtracts it.
       const cache = s.memory_stats?.stats?.inactive_file ?? s.memory_stats?.stats?.cache ?? 0;
@@ -110,6 +115,13 @@ async function sampleStats(ids) {
         cpu: computeCpuPercent(s),
         memory: Math.max(0, usage - cache),
         memoryLimit: s.memory_stats?.limit || 0,
+        rxBytes: Object.values(s.networks || {}).reduce((sum, n) => sum + (n.rx_bytes || 0), 0),
+        txBytes: Object.values(s.networks || {}).reduce((sum, n) => sum + (n.tx_bytes || 0), 0),
+        readBytes: (s.blkio_stats?.io_service_bytes_recursive || []).filter((b) => b.op.toLowerCase() === 'read').reduce((sum, b) => sum + b.value, 0),
+        writeBytes: (s.blkio_stats?.io_service_bytes_recursive || []).filter((b) => b.op.toLowerCase() === 'write').reduce((sum, b) => sum + b.value, 0),
+        pids: s.pids_stats?.current ?? null,
+        restartCount: info?.RestartCount ?? null,
+        oomKilled: info?.State?.OOMKilled ?? false,
       };
     } catch {
       data[id] = null;
@@ -122,14 +134,20 @@ async function sampleStats(ids) {
 // refresh when the cache is stale. Callers get slightly-old numbers rather
 // than a slow response; the client re-polls every 5s so they fill in.
 export function stats(ids) {
-  if (Date.now() - statsCache.at >= STATS_TTL && !statsRefreshing) {
-    statsRefreshing = true;
-    sampleStats(ids)
-      .then((data) => { statsCache = { at: Date.now(), data }; })
-      .catch(() => {})
-      .finally(() => { statsRefreshing = false; });
-  }
+  refreshStats(ids).catch(() => {});
   return statsCache.data;
+}
+
+// Shared by page requests and the independent history collector. Only one
+// batch runs at once, and the collector waits for its completed result.
+export async function refreshStats(ids) {
+  if (statsRefreshing) return statsRefreshing;
+  if (Date.now() - statsCache.at < STATS_TTL && ids.every((id) => Object.hasOwn(statsCache.data, id))) return statsCache.data;
+  statsRefreshing = sampleStats(ids).then((data) => {
+    statsCache = { at: Date.now(), data };
+    return data;
+  }).finally(() => { statsRefreshing = null; });
+  return statsRefreshing;
 }
 
 // The detail page shows one container, so a direct sample is cheap enough to

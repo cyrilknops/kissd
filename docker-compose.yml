@@ -43,7 +43,7 @@ services:
       - ${REPO_DIR:-/srv/docker}:${REPO_DIR:-/srv/docker}
       # Read-only view of the host filesystem, for disk usage reporting.
       - /:/host/root:ro
-      # Settings, alert state, and the persisted Claude OAuth login.
+      # Settings, metrics history, alert state, and the persisted Claude OAuth login.
       - ./data:/data
     networks:
       proxy-tier:

@@ -115,6 +115,17 @@ test('empty history and SQL-like target strings are safe', (t) => {
   assert.equal(db.history({ target: 'container:web', range: '1h', now }).points.length, 1);
 });
 
+test('a failed sample transaction leaves no partial observations behind', (t) => {
+  const { db } = store(t);
+  assert.throws(() => db.record(now - 30_000, [
+    { target: 'host', name: 'Host', state: 'up', metrics: { cpu: 5 } },
+    { target: 'container:broken', state: 'up' },
+  ]));
+  const h = db.history({ range: '1h', now });
+  assert.equal(h.points.length, 0);
+  assert.equal(h.targets.length, 0);
+});
+
 test('only supported bounded timeframes and valid retention settings are accepted', () => {
   for (const range of ['1h', '3h', '1d', '3d', '7d']) assert.equal(parseHistoryQuery({ range }).range, range);
   assert.deepEqual(parseHistoryQuery({}), { range: '7d', target: 'host' });

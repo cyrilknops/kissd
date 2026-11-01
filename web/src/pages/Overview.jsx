@@ -1,8 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api, bytes, duration } from '../api';
-import Sparkline from '../components/Sparkline';
-
-const HISTORY = 40;
+import HistoryPanel from '../components/HistoryPanel';
 
 function severity(pct) {
   if (pct >= 90) return 'crit';
@@ -10,13 +8,12 @@ function severity(pct) {
   return '';
 }
 
-function StatCard({ title, value, sub, pct, spark, color }) {
+function StatCard({ title, value, sub, pct }) {
   return (
     <div className="card">
       <h3>{title}</h3>
       <div className="stat-value">{value}</div>
       <div className="stat-sub">{sub}</div>
-      {spark && <div style={{ marginTop: 10 }}><Sparkline data={spark} max={100} color={color} /></div>}
       {pct !== undefined && (
         <div className="bar"><i className={severity(pct)} style={{ width: `${Math.min(100, pct)}%` }} /></div>
       )}
@@ -27,8 +24,6 @@ function StatCard({ title, value, sub, pct, spark, color }) {
 export default function Overview({ containers }) {
   const [snap, setSnap] = useState(null);
   const [error, setError] = useState('');
-  const cpuHist = useRef([]);
-  const memHist = useRef([]);
 
   useEffect(() => {
     let stop = false;
@@ -36,8 +31,6 @@ export default function Overview({ containers }) {
       try {
         const data = await api.host();
         if (stop) return;
-        cpuHist.current = [...cpuHist.current, data.cpu].slice(-HISTORY);
-        memHist.current = [...memHist.current, data.memory.percent].slice(-HISTORY);
         setSnap(data);
         setError('');
       } catch (err) {
@@ -71,16 +64,12 @@ export default function Overview({ containers }) {
           value={`${snap.cpu.toFixed(1)}%`}
           sub={`Load ${snap.load.one.toFixed(2)} / ${snap.load.five.toFixed(2)} / ${snap.load.fifteen.toFixed(2)}`}
           pct={snap.cpu}
-          spark={cpuHist.current}
-          color="#4f8cff"
         />
         <StatCard
           title="Memory"
           value={`${snap.memory.percent.toFixed(1)}%`}
           sub={`${bytes(snap.memory.used)} of ${bytes(snap.memory.total)} used`}
           pct={snap.memory.percent}
-          spark={memHist.current}
-          color="#2ecc71"
         />
         <StatCard
           title="Containers"
@@ -96,6 +85,8 @@ export default function Overview({ containers }) {
           sub={`▲ ${bytes(snap.network.txRate)}/s · total ▼ ${bytes(snap.network.rxBytes)}`}
         />
       </div>
+
+      <HistoryPanel compact />
 
       <div className="card" style={{ marginTop: 16 }}>
         <h3>Disks</h3>

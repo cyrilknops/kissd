@@ -15,6 +15,8 @@ import * as claude from './claude.js';
 import * as compose from './compose.js';
 import * as registry from './registry.js';
 import * as mute from './mute.js';
+import * as metrics from './metrics.js';
+import { registerMetricsRoutes } from './metrics-routes.js';
 import { send as ntfySend } from './ntfy.js';
 import { handleTerminal, handleLogs } from './terminal.js';
 
@@ -64,6 +66,8 @@ app.post('/api/elevate', auth.requireAuth, (req, res) => {
 });
 
 // --- host metrics ----------------------------------------------------------
+
+registerMetricsRoutes(app, { requireAuth: auth.requireAuth, history: metrics.history });
 
 app.get('/api/host', auth.requireAuth, async (req, res) => {
   try {
@@ -360,6 +364,8 @@ app.put('/api/settings', auth.requireAuth, (req, res) => {
     // Registry logins only take effect once they are on disk where the docker
     // CLI will look for them, so the config is rewritten with every save.
     registry.write(updated);
+    try { metrics.prune(); }
+    catch (err) { console.error(`metrics cleanup failed: ${err.message}`); }
     res.json(settingsStore.redact(updated));
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -471,14 +477,15 @@ server.listen(PORT, () => {
     console.error(`could not write the docker config: ${err.message}`);
   }
   // Sample stats once up front so the first page load already has numbers.
-  dockerApi.primeStats();
+  try { metrics.start(); }
+  catch (err) { console.error(`could not start metrics collection: ${err.message}`); }
   alerts.start();
 });
 
 for (const sig of ['SIGTERM', 'SIGINT']) {
   process.on(sig, () => {
     alerts.stop();
-    server.close(() => process.exit(0));
+    server.close(async () => { await metrics.stop().catch(() => {}); process.exit(0); });
     setTimeout(() => process.exit(0), 5000).unref();
   });
 }

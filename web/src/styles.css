@@ -132,6 +132,27 @@ a { color: var(--accent); }
 .stat-value { font-size: 27px; font-weight: 640; line-height: 1.1; }
 .stat-sub { color: var(--muted); font-size: 12px; margin-top: 5px; }
 
+/* Historical metrics share a time axis and downtime overlays. */
+.history-panel { margin-top: 20px; }
+.metrics-toolbar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }
+.metrics-toolbar select { max-width: min(320px, 80vw); min-width: 160px; padding: 7px 12px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; }
+.metrics-caption { font-size: 12px; margin-bottom: 14px; }
+.availability-card, .metrics-charts, .metrics-events { margin-top: 14px; }
+.availability-track { height: 16px; display: flex; overflow: hidden; border-radius: 4px; }
+.availability-track > span { display: block; height: 100%; }
+.availability-legend { display: flex; flex-wrap: wrap; gap: 14px; margin: 10px 0; font-size: 11px; color: var(--muted); }
+.availability-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.availability-legend i { width: 8px; height: 8px; border-radius: 2px; }
+.grid.cols-2.metrics-charts { grid-template-columns: repeat(auto-fit, minmax(min(460px, 100%), 1fr)); }
+.metric-chart svg { display: block; width: 100%; height: 180px; }
+.metric-chart svg text { fill: var(--muted); font: 12px ui-sans-serif, system-ui, sans-serif; }
+.chart-readout { display: flex; flex-wrap: wrap; gap: 4px 12px; min-height: 38px; font-size: 11px; }
+.chart-readout > .dim { width: 100%; }
+.metrics-events ul { list-style: none; padding: 0; margin-bottom: 0; }
+.metrics-events li { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+.metrics-events li:last-child { border-bottom: 0; }
+.metrics-events time { font-size: 12px; color: var(--muted); }
+
 .bar { height: 6px; background: var(--panel-2); border-radius: 99px; overflow: hidden; margin-top: 12px; }
 .bar > i { display: block; height: 100%; background: var(--accent); border-radius: 99px; transition: width .4s ease; }
 .bar > i.warn { background: var(--amber); }
