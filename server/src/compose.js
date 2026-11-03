@@ -8,6 +8,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { docker, composeInfo, updateSelfDetached, restartSelfDetached, SELF_NAME } from './docker.js';
 import * as registry from './registry.js';
+import {readPolicy,policySummary,assertIdle,assertPlainAction,createGuardedUpdater,runCommand} from './guarded-updates.js';
 
 const DATA_DIR = process.env.DATA_DIR || '/data';
 const BACKUP_DIR = path.join(DATA_DIR, 'compose-backups');
@@ -42,9 +43,8 @@ export async function projects() {
     if ((c.Names || []).some((n) => n.replace(/^\//, '') === SELF_NAME)) entry.hasSelf = true;
   }
 
-  return [...map.values()]
-    .map((e) => ({ ...e, services: [...e.services].sort(), files: e.files.sort() }))
-    .sort((a, b) => a.project.localeCompare(b.project));
+  const result=[...map.values()].map(e=>({...e,services:[...e.services].sort(),files:e.files.sort()}));
+  return (await Promise.all(result.map(async p=>({...p,updatePolicy:await policySummary(p)})))).sort((a,b)=>a.project.localeCompare(b.project));
 }
 
 // The set of files that may be touched, straight from the live labels.
@@ -112,6 +112,7 @@ async function backup(project, filePath, content) {
 // automatically if the result does not parse.
 export async function write(filePath, content, expectedMtimeMs) {
   const project = await resolveOrThrow(filePath);
+  await assertIdle(project);
   if (typeof content !== 'string') throw new Error('Content must be a string');
   if (Buffer.byteLength(content) > MAX_BYTES) throw new Error('Content is too large');
 
@@ -181,6 +182,7 @@ function streamSteps(project, steps, onData) {
 // Streams `docker compose up -d` for the whole project.
 export async function apply(projectName, onData) {
   const project = await findProject(projectName);
+  await assertPlainAction(project);
   return streamSteps(project, [composeArgs(project, 'up', ['-d'])], onData);
 }
 
@@ -193,6 +195,17 @@ export const DETACHED = 'detached';
 // with no image to pull) from aborting the update for everything else.
 export async function update(projectName, onData) {
   const project = await findProject(projectName);
+  const policy=await readPolicy(project);
+  if(policy){
+    const run=(argv,options={})=>runCommand(argv,{...options,cwd:options.cwd??project.workdir,env:registry.env()});
+    const updater=createGuardedUpdater({run,inspect:async(service,p)=>{
+      const ids=(await run(composeArgs(p,'ps',['--all','-q',service]))).stdout.trim().split('\n').filter(Boolean);
+      if(ids.length!==1)throw Error('Guarded services must have exactly one container each');
+      return docker.getContainer(ids[0]).inspect();
+    }});
+    return updater.update(project,policy,onData);
+  }
+  await assertIdle(project);
 
   if (project.hasSelf) {
     onData(`This project runs kissd itself (${SELF_NAME}).\n`);
@@ -203,7 +216,7 @@ export async function update(projectName, onData) {
   }
 
   return streamSteps(project, [
-    composeArgs(project, 'pull', ['--ignore-pull-failures']),
+    composeArgs(project, 'pull', ['--ignore-buildable']),
     composeArgs(project, 'up', ['-d']),
   ], onData);
 }
@@ -214,6 +227,7 @@ export async function update(projectName, onData) {
 // Save & apply are for.
 export async function restart(projectName, onData) {
   const project = await findProject(projectName);
+  await assertPlainAction(project);
 
   if (project.hasSelf) {
     onData(`This project runs kissd itself (${SELF_NAME}).\n`);
@@ -246,3 +260,8 @@ export async function readBackup(projectName, name) {
   const file = path.join(BACKUP_DIR, projectName, safe);
   return fs.readFile(file, 'utf8');
 }
+
+// Shared by container actions and maintenance so other controls cannot interrupt a guarded run.
+export async function ensureProjectIdle(projectName){return assertIdle(await findProject(projectName));}
+export async function ensurePlainAction(projectName){return assertPlainAction(await findProject(projectName));}
+export async function ensureNoGuardedRuns(){for(const p of await projects())await assertIdle(p);}

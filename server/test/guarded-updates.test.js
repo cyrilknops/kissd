@@ -14,7 +14,7 @@ async function fixture(t, options={}) {
  const config={name:'fixture',services:{db:{image:'postgres:16-alpine'},'api-a':{image:ref('c'),environment:{TRACE_RATE:'0.01'}},'api-b':{image:ref('c'),environment:{TRACE_RATE:'0.01'}},web:{image:ref('d')}}};
  await fs.writeFile(file,JSON.stringify(config),{mode:0o600});await fs.writeFile(path.join(dir,'.env'),'PRIVATE=fixture-secret\n',{mode:0o600});
  const services=['api-a','api-b','web'];
- const policy={version:1,services,database:'db',approvedRevision:rev,configurationHash:module.configurationHash(config,services),preflight:[{name:'No active games',argv:['fixture-preflight'],expect:'0'}],health:[{name:'Quorum and public routes',argv:['fixture-health'],expect:'ready'}],order:['fixture-order'],attempts:2,intervalMs:1};
+ const policy={version:1,backwardCompatible:true,services,database:'db',approvedRevision:rev,configurationHash:module.configurationHash(config,services),preflight:[{name:'No active games',argv:['fixture-preflight'],expect:'0'}],health:[{name:'Quorum and public routes',argv:['fixture-health'],expect:'ready'}],order:['fixture-order'],attempts:2,intervalMs:1};
  const containers=Object.fromEntries(['db',...services].map(n=>[n,{Id:n,Image:'sha256:'+((n==='web'?'b':'a').repeat(64)),RestartCount:0,State:{Running:true,StartedAt:'before',Health:{Status:'healthy'}},Config:{Image:n==='db'?'postgres:16-alpine':ref(n==='web'?'b':'a'),Labels:{'org.opencontainers.image.revision':'f'.repeat(40)}},Mounts:[]}]));
  const calls=[];let healthFailures=0;
  const run=async(argv,opts={})=>{
@@ -31,7 +31,7 @@ async function fixture(t, options={}) {
   }
   if(argv[1]==='pull')throw Error('pull failed: fixture-private-detail');
   if(argv.includes('config'))return {stdout:JSON.stringify(JSON.parse(await fs.readFile(file,'utf8')))};
-  if(argv.includes('pg_dump')){if(options.backupFail)throw Error('backup failed');await fs.writeFile(opts.outputFile,'verified archive');return {stdout:''};}
+  if(argv.some(a=>a.includes('pg_dump'))){if(options.backupFail)throw Error('backup failed');await fs.writeFile(opts.outputFile,'verified archive');return {stdout:''};}
   if(argv.includes('pg_restore'))return {stdout:'archive list'};
   if(argv.includes('up')){
    const service=argv.at(-1);const cfg=JSON.parse(await fs.readFile(file,'utf8'));containers[service].Config.Image=cfg.services[service].image;containers[service].Image='sha256:'+cfg.services[service].image.split(':').at(-1);containers[service].State.StartedAt='after';
@@ -47,7 +47,7 @@ async function fixture(t, options={}) {
 test('guarded update backs up before sequential replacements, excludes DB and preserves configuration',async t=>{
  const f=await fixture(t);const messages=[];await f.updater.update(f.project,f.policy,x=>messages.push(x));
  const updates=f.calls.filter(a=>a.includes('up'));assert.deepEqual(updates.map(a=>a.at(-1)),['api-b','api-a','web']);assert(updates.every(a=>a.includes('--no-deps')&&a.includes('--pull')&&a.includes('never')));
- const backupIndex=f.calls.findIndex(a=>a.includes('pg_dump'));assert(backupIndex>=0&&backupIndex<f.calls.findIndex(a=>a.includes('up')));assert(f.calls.some(a=>a.includes('pg_restore')));
+ const backupIndex=f.calls.findIndex(a=>a.some(v=>v.includes('pg_dump')));assert(backupIndex>=0&&backupIndex<f.calls.findIndex(a=>a.includes('up')));assert(f.calls.some(a=>a.includes('pg_restore')));
  assert.equal(f.containers.db.State.StartedAt,'before');assert.equal((await fs.readFile(f.file,'utf8')),JSON.stringify(f.config));assert(!messages.join('').includes('fixture-secret'));
 });
 for(const [name,options,pattern] of [['pull failure',{pullFail:true},/image|pull/i],['image revision mismatch',{revision:'0'.repeat(40)},/revision/i],['active games',{active:true},/preflight|active|check/i],['unverified database backup',{backupFail:true},/backup/i],['invalid update order',{order:['db','api-a','web']},/order/i]]){
@@ -64,7 +64,7 @@ for(const options of [{healthFail:true},{upFail:true}])test('failed replacement 
 });
 test('an already deployed pinned release performs health checks without restarting or backing up the DB',async t=>{
  const f=await fixture(t);for(const n of f.policy.services){f.containers[n].Config.Image=f.config.services[n].image;f.containers[n].Image='sha256:'+f.config.services[n].image.split(':').at(-1);}
- await f.updater.update(f.project,f.policy,()=>{});assert(f.calls.some(a=>a[0]==='fixture-health'));assert.equal(f.calls.some(a=>a.includes('up')||a.includes('pg_dump')),false);
+ await f.updater.update(f.project,f.policy,()=>{});assert(f.calls.some(a=>a[0]==='fixture-health'));assert.equal(f.calls.some(a=>a.includes('up')||a.some(v=>v.includes('pg_dump'))),false);
 });
 test('policy parsing rejects malformed, oversized and writable policies without a legacy fallback',async t=>{
  assert.ok(module);const f=await fixture(t);const p=path.join(f.dir,'kissd-update.json');assert.equal(await module.readPolicy(f.project),null);
