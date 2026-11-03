@@ -183,6 +183,7 @@ function streamSteps(project, steps, onData) {
 export async function apply(projectName, onData) {
   const project = await findProject(projectName);
   await assertPlainAction(project);
+  if(project.hasSelf)await ensureNoGuardedRuns();
   return streamSteps(project, [composeArgs(project, 'up', ['-d'])], onData);
 }
 
@@ -208,6 +209,7 @@ export async function update(projectName, onData) {
   await assertIdle(project);
 
   if (project.hasSelf) {
+    await ensureNoGuardedRuns();
     onData(`This project runs kissd itself (${SELF_NAME}).\n`);
     onData('Handing the compose run to the host so it survives this container being replaced.\n');
     onData('The panel will drop out for a few seconds — reload once it returns.\n');
@@ -230,6 +232,7 @@ export async function restart(projectName, onData) {
   await assertPlainAction(project);
 
   if (project.hasSelf) {
+    await ensureNoGuardedRuns();
     onData(`This project runs kissd itself (${SELF_NAME}).\n`);
     onData('Handing the compose run to the host so it survives kissd restarting.\n');
     onData('The panel will drop out for a few seconds — reload once it returns.\n');

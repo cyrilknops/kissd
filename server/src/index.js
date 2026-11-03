@@ -17,6 +17,8 @@ import * as registry from './registry.js';
 import * as mute from './mute.js';
 import * as metrics from './metrics.js';
 import { registerMetricsRoutes } from './metrics-routes.js';
+import {registerDeploymentGuards} from './deployment-guards.js';
+import {policySummary} from './guarded-updates.js';
 import { send as ntfySend } from './ntfy.js';
 import { handleTerminal, handleLogs } from './terminal.js';
 
@@ -97,6 +99,8 @@ function muteWhile(keys, scope, reason) {
   return mute.begin(keys);
 }
 
+registerDeploymentGuards(app,{requireAuth:auth.requireAuth,inspect:dockerApi.inspect,composeInfo:dockerApi.composeInfo,selfName:dockerApi.SELF_NAME,ensurePlain:compose.ensurePlainAction,ensureIdle:compose.ensureProjectIdle,ensureNoRuns:compose.ensureNoGuardedRuns});
+
 // --- containers ------------------------------------------------------------
 
 app.get('/api/containers', auth.requireAuth, async (req, res) => {
@@ -105,7 +109,10 @@ app.get('/api/containers', auth.requireAuth, async (req, res) => {
     const running = containers.filter((c) => c.state === 'running').map((c) => c.id);
     // Cached and non-blocking: the list must not wait on stats sampling.
     const stats = dockerApi.stats(running);
-    res.json(containers.map((c) => ({ ...c, stats: stats[c.id] || null })));
+    const policies=new Map();
+    await Promise.all(containers.filter(c=>c.compose).map(async c=>{if(!policies.has(c.compose.project))policies.set(c.compose.project,policySummary({...c.compose,services:containers.filter(x=>x.compose?.project===c.compose.project).map(x=>x.compose.service)}));}));
+    const values=new Map(await Promise.all([...policies].map(async([key,value])=>[key,await value])));
+    res.json(containers.map(c=>({...c,stats:stats[c.id]||null,compose:c.compose?{...c.compose,updatePolicy:values.get(c.compose.project)}:null})));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
