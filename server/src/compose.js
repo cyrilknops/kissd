@@ -193,7 +193,10 @@ function streamSteps(project, steps, onData) {
       if (idx >= steps.length) return resolve(0);
       const args = steps[idx];
       onData(`$ docker ${args.join(' ')}\n\n`);
-      const child = spawn('docker', args, { cwd: project.workdir, env: registry.env() });
+      const child = spawn('docker', args, {
+        cwd: project.workdir,
+        env: registry.env(),
+      });
       child.stdout.on('data', (d) => onData(d.toString()));
       child.stderr.on('data', (d) => onData(d.toString()));
       child.on('error', (err) => {
@@ -224,18 +227,23 @@ export async function apply(projectName, onData) {
 export const DETACHED = 'detached';
 
 // Pulls every image in the project, then recreates the services whose image
-// actually changed. --ignore-pull-failures keeps a locally-built service (one
-// with no image to pull) from aborting the update for everything else.
+// actually changed. Pull failures stop before any service is recreated.
 export async function update(projectName, onData) {
   const project = await findProject(projectName);
   const policy = await readPolicy(project);
   if (policy) {
     const run = (argv, options = {}) =>
-      runCommand(argv, { ...options, cwd: options.cwd ?? project.workdir, env: registry.env() });
+      runCommand(argv, {
+        ...options,
+        cwd: options.cwd ?? project.workdir,
+        env: registry.env(),
+      });
     const updater = createGuardedUpdater({
       run,
       inspect: async (service, p) => {
-        const ids = (await run(composeArgs(p, 'ps', ['--all', '-q', service]))).stdout
+        const ids = (
+          await run(['docker', ...composeArgs(p, 'ps', ['--all', '-q', service])])
+        ).stdout
           .trim()
           .split('\n')
           .filter(Boolean);
