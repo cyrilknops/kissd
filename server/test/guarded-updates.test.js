@@ -113,7 +113,9 @@ async function fixture(t, options = {}) {
     services: ['db', ...services],
     hasSelf: false,
   };
+  let journalWrites=0;
   const updater = module.createGuardedUpdater({
+    writeJournal: options.journalFailure ? async(file,value)=>{if(++journalWrites>=4)throw Error('fixture journal failure');await fs.writeFile(file,value,{mode:0o600});}:undefined,
     run,
     inspect: async (service) => structuredClone(containers[service]),
     sleep: async () => {},
@@ -382,10 +384,30 @@ test('insufficient backup space stops before database dumping or container chang
   );
 });
 
-test('maintenance and deployment startup reserve their work before awaiting filesystem or Docker calls', async t=>{
- const f=await fixture(t);assert.equal(typeof module.withMaintenance,'function');
- let release;const barrier=new Promise(resolve=>{release=resolve;});
- const maintenance=module.withMaintenance(()=>barrier);await assert.rejects(f.updater.update(f.project,f.policy,()=>{}),/maintenance/i);release();await maintenance;
- let entered=false;const deployment=f.updater.update(f.project,f.policy,()=>{});
- await assert.rejects(module.withMaintenance(async()=>{entered=true;}),/update|deployment/i);assert.equal(entered,false);await deployment;
+test('maintenance and deployment startup reserve their work before awaiting filesystem or Docker calls', async (t) => {
+  const f = await fixture(t);
+  assert.equal(typeof module.withMaintenance, 'function');
+  let release;
+  const barrier = new Promise((resolve) => {
+    release = resolve;
+  });
+  const maintenance = module.withMaintenance(() => barrier);
+  await assert.rejects(
+    f.updater.update(f.project, f.policy, () => {}),
+    /maintenance/i,
+  );
+  release();
+  await maintenance;
+  let entered = false;
+  const deployment = f.updater.update(f.project, f.policy, () => {});
+  await assert.rejects(
+    module.withMaintenance(async () => {
+      entered = true;
+    }),
+    /update|deployment/i,
+  );
+  assert.equal(entered, false);
+  await deployment;
 });
+
+test('journal write failure after a replacement still rolls back and retains the recovery lock',async t=>{const f=await fixture(t,{journalFailure:true});await assert.rejects(f.updater.update(f.project,f.policy,()=>{}),/journal|recovery/i);assert.equal(f.containers['api-b'].Config.Image,ref('a'));await assert.rejects(module.assertIdle(f.project),/recovery/i);});
