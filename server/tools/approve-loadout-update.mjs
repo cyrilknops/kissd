@@ -10,6 +10,7 @@ const values = process.argv.slice(2);
 const args = {};
 for (let i = 0; i < values.length; i++) {
   if (values[i] === '--backward-compatible') args.compatible = true;
+  else if (values[i] === '--latest') args.latest = true;
   else if (['--project', '--revision', '--origin', '--ci-run'].includes(values[i]))
     args[values[i].slice(2)] = values[++i];
   else throw Error('Unknown argument');
@@ -58,6 +59,7 @@ try {
     revision: args.revision,
     ciRun: args['ci-run'],
     config,
+    latest: args.latest === true,
   });
   if (
     !project.services.includes(policy.database) ||
@@ -97,6 +99,7 @@ try {
       services: policy.services,
       databaseExcluded: policy.database,
       ciRun: policy.ciRun,
+      tracksLatest: Boolean(policy.imageTags),
     }),
   );
 } finally {

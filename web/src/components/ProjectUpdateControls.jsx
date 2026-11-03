@@ -17,11 +17,19 @@ export default function ProjectUpdateControls({
           blocked
             ? 'Update policy needs attention'
             : guarded
-              ? 'Update the approved application release with backup and health checks; the database stays unchanged'
+              ? policy.tracksLatest
+                ? 'Pull latest application images with backup, health checks and rollback; the database stays unchanged'
+                : 'Update the approved application release with backup and health checks; the database stays unchanged'
               : `Pull and recreate services in ${project}`
         }
       >
-        {guarded ? 'Guarded update' : short ? 'Update' : 'Update all'}
+        {guarded
+          ? policy.tracksLatest
+            ? 'Update latest'
+            : 'Guarded update'
+          : short
+            ? 'Update'
+            : 'Update all'}
       </button>
       <button
         className="btn xs"

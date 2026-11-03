@@ -29,6 +29,9 @@ test('project update controls show guarded scope, block bypasses and retain ordi
   assert.equal((blocked.match(/disabled=""/g) || []).length, 2);
   assert.match(blocked, /policy/i);
   const normal = render(null);
+  const tracking = render({ mode: 'guarded', tracksLatest: true });
+  assert.match(tracking, /Update latest/);
+  assert.match(tracking, /latest.*backup/i);
   assert.match(normal, /Update all/);
   assert.doesNotMatch(normal, /disabled=""/);
 });

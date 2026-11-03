@@ -1,6 +1,6 @@
-// Optional Loadout recipe. Approval stays an owner action; the dashboard never guesses a release.
+// Optional Loadout recipe. Latest tracking is a one-time owner opt-in.
 import { configurationHash } from './guarded-updates.js';
-export function buildLoadoutPolicy({ prefix, origin, revision, config, ciRun }) {
+export function buildLoadoutPolicy({ prefix, origin, revision, config, ciRun, latest = false }) {
   if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(prefix) || !/^[a-f0-9]{40}$/.test(revision))
     throw Error('Invalid project or revision');
   const url = new URL(origin);
@@ -26,6 +26,18 @@ export function buildLoadoutPolicy({ prefix, origin, revision, config, ciRun }) 
     services,
     database,
     approvedImages: Object.fromEntries(services.map((s) => [s, config.services?.[s]?.image])),
+    ...(latest
+      ? {
+          imageTags: Object.fromEntries(
+            services.map((s) => {
+              const ref = config.services?.[s]?.image;
+              if (!/^.+@sha256:[a-f0-9]{64}$/.test(ref || ''))
+                throw Error('Pin the initial deployment before enabling latest');
+              return [s, ref.split('@')[0] + ':latest'];
+            }),
+          ),
+        }
+      : {}),
     configurationHash: configurationHash(config, services),
     preflight: [
       {

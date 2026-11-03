@@ -5,11 +5,18 @@ directory. The file must be a regular file without group/world write permission.
 Malformed policies fail closed. Projects without a policy keep their normal
 update controls; image-pull failures now stop before recreation.
 
-Guarded updates deploy an **approved pinned release**. They do not select a newer
-`:latest` image, automatically approve CI, or upgrade the database. An owner must
-verify the release's CI run and database compatibility before approving its exact
-image digests. Approval is a local owner action; it does not require copying a
-GitHub credential to the VPS.
+Guarded updates support **approved pins** and opt-in **latest tracking**. In latest
+mode the button reads **Update latest**. One click pulls the configured application
+repositories' `:latest` tags, resolves them once to immutable digests, verifies a
+matching Git revision across the application images, and deploys that snapshot.
+No new approval is required for each release. A tag moving during deployment cannot
+change its target. A failed pull, missing digest or mixed release stops before any
+service or Compose source changes. Database images are never tracked or updated.
+
+Latest tracking trusts the configured repositories' publishing process. It does not
+independently verify GitHub CI or prove that a future migration is compatible with
+rollback. Publish compatible releases to `latest`; handle destructive schema changes
+separately. Credentials stay in kissd's registry settings.
 
 ## Loadout approval
 
@@ -24,14 +31,22 @@ docker exec kissd node tools/approve-loadout-update.mjs \
   --revision <40-character-commit> \
   --origin https://dev.loadout.be \
   --ci-run https://github.com/iwg-it/iwg/actions/runs/<run-id> \
-  --backward-compatible
+  --backward-compatible --latest
 ```
 
 Use project `loadout` and origin `https://game.loadout.be` for live. Run the dev
-update and functional checks before approving live. The helper records the owner-
-verified CI URL; it does **not** independently authenticate to GitHub to verify it.
-Future releases need a new explicit approval. An edited digest with the same source
-revision is still refused unless that exact digest was approved.
+update and functional checks before live. This is a one-time setup for the named
+application repositories. Later releases need only a click on **Update latest**.
+The helper records the initial owner-verified CI URL; it does **not** independently
+authenticate to GitHub to verify future releases. Omit `--latest` to keep explicit
+approval for every release.
+
+For another compatible project, add `imageTags` to its policy, with one
+`service: "repository:latest"` entry for each selected application service. Each
+repository must match that service's initial `approvedImages` entry. The current
+Compose and running images must already be pinned. Existing policies without
+`imageTags` retain their approved-pin behavior. All selected latest images must
+have the same 40-character `org.opencontainers.image.revision` label.
 
 Approval stores a hash of the complete effective Compose configuration with only
 the selected application image fields removed. Changes to environment variables,
@@ -53,26 +68,30 @@ PostgreSQL tools. It does not install host software or send release emails.
 
 ## Update behavior
 
-1. Read the approved policy and effective Compose configuration. Refuse unpinned
-   application images, different digests, wrong revision labels or configuration drift.
+1. Read the policy and effective Compose configuration. Refuse configuration drift
+   or unpinned current images. Resolve latest tags once when configured, or enforce
+   the exact approved digests and revision in approved-pin mode.
 2. Resolve the current containers and record protected services. Run preflight and
-   health checks. If the approved images are already running, report a healthy
+   health checks. If the target images are already running, report a healthy
    no-op without restarting services or creating a database dump.
 3. Save private Compose/environment/policy snapshots and prepare the actual old
    running image pins for rollback. Check free space against PostgreSQL database
    size with additional headroom. Create a custom-format dump and verify its archive
    using `pg_restore --list` before replacing any service.
-4. Replace each selected service with `up -d --no-deps --pull never`. Wait for its
+4. In latest mode, write the resolved application pins to the Compose file only
+   after backup verification. Replace each selected service with
+   `up -d --no-deps --pull never`. Wait for its
    Docker healthcheck when present, run application health checks, and verify its
    image and restart count. No project-wide `up` runs in this path.
 5. If a replacement or health gate fails, write the actual previous image pins back
    to the Compose file and restore touched services in reverse order. Verify health
    and protected services again. A failed update is reported as failed even when
    rollback succeeds. The Compose file then points at the previous images; review the
-   failure and set the desired pins again before retrying the approved release.
+   failure before retrying. Latest mode resolves the tags again on the next click;
+   approved-pin mode requires restoring the desired pins before retrying.
 
 The dashboard disables bulk restart and individual updates for guarded projects.
-Save & guarded update uses the same guarded path. Direct API calls have the same
+Save & guarded update / Save & update latest uses the same guarded path. Direct API calls have the same
 checks. Concurrent clicks attach to the current deployment; they do not start a
 second replacement sequence. Maintenance and deployment startup reserve their work
 before awaiting filesystem or Docker operations.

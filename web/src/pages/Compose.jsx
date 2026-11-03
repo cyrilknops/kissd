@@ -162,7 +162,11 @@ export default function Compose() {
             disabled={busy || !file || selectedPolicy?.mode === 'blocked'}
             onClick={() => save({ thenApply: true })}
           >
-            {selectedPolicy?.mode === 'guarded' ? 'Save & guarded update' : 'Save & apply'}
+            {selectedPolicy?.mode === 'guarded'
+              ? selectedPolicy.tracksLatest
+                ? 'Save & update latest'
+                : 'Save & guarded update'
+              : 'Save & apply'}
           </button>
         </div>
       </div>

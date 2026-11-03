@@ -42,3 +42,25 @@ test('Loadout policy protects PostgreSQL, keeps one ingest owner and orders the 
       }),
     );
 });
+test('Loadout can opt into tracking latest without approving every release', () => {
+  const p = module.buildLoadoutPolicy({
+    prefix: 'loadout',
+    origin: 'https://game.loadout.be',
+    revision: 'e'.repeat(40),
+    latest: true,
+    config: {
+      services: {
+        'loadout-api': { image: 'repo.knops.be/iwg-it/loadout-api@sha256:' + 'a'.repeat(64) },
+        'loadout-api-replica': {
+          image: 'repo.knops.be/iwg-it/loadout-api@sha256:' + 'a'.repeat(64),
+        },
+        'loadout-web': { image: 'repo.knops.be/iwg-it/loadout-web@sha256:' + 'b'.repeat(64) },
+      },
+    },
+  });
+  assert.deepEqual(p.imageTags, {
+    'loadout-api': 'repo.knops.be/iwg-it/loadout-api:latest',
+    'loadout-api-replica': 'repo.knops.be/iwg-it/loadout-api:latest',
+    'loadout-web': 'repo.knops.be/iwg-it/loadout-web:latest',
+  });
+});
