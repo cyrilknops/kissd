@@ -92,6 +92,10 @@ export async function readPolicy(project) {
     throw Error('Invalid update policy JSON');
   }
   if (
+    (p.attempts !== undefined &&
+      (!Number.isSafeInteger(p.attempts) || p.attempts < 1 || p.attempts > 180)) ||
+    (p.intervalMs !== undefined &&
+      (!Number.isSafeInteger(p.intervalMs) || p.intervalMs < 1 || p.intervalMs > 10000)) ||
     p.version !== 1 ||
     !Array.isArray(p.services) ||
     p.services.length < 1 ||
@@ -200,6 +204,19 @@ async function privateDir(dir) {
   const s = await fs.lstat(dir);
   if (!s.isDirectory() || s.isSymbolicLink() || s.mode & 0o077)
     throw Error('Update journal directory must be private');
+  const ignore = path.join(dir, '.gitignore');
+  try {
+    await fs.writeFile(ignore, '*\n', { mode: 0o600, flag: 'wx' });
+  } catch (e) {
+    if (e.code !== 'EEXIST') throw e;
+    const stat = await fs.lstat(ignore);
+    if (
+      !stat.isFile() ||
+      stat.isSymbolicLink() ||
+      (await fs.readFile(ignore, 'utf8')).trim() !== '*'
+    )
+      throw Error('Private backup ignore rules require owner review');
+  }
 }
 async function atomic(file, content, mode = 0o600) {
   const temp = file + '.' + randomUUID() + '.tmp';
@@ -298,108 +315,216 @@ export function createGuardedUpdater({
   async function image(service, ref, policy, emit) {
     let value;
     const read = async () => JSON.parse((await run(['docker', 'image', 'inspect', ref])).stdout)[0];
-    try { value = await read(); } catch {
+    try {
+      value = await read();
+    } catch {
       emit('Fetching pinned image for ' + service + '…\n');
-      try { await run(['docker', 'pull', ref], {timeoutMs:300000}); value = await read(); }
-      catch { throw Error('Pinned image pull failed for ' + service); }
+      try {
+        await run(['docker', 'pull', ref], { timeoutMs: 300000 });
+        value = await read();
+      } catch {
+        throw Error('Pinned image pull failed for ' + service);
+      }
     }
-    if(value?.Config?.Labels?.['org.opencontainers.image.revision']!==policy.approvedRevision)
+    if (value?.Config?.Labels?.['org.opencontainers.image.revision'] !== policy.approvedRevision)
       throw Error('Image revision does not match the approved release');
     return value;
   }
   async function prepare(project, policy, emit) {
-    if(project.hasSelf||project.files.length!==1)throw Error('Guarded updates require one compose file and cannot replace kissd itself');
-    const state=await sourceState(project);
-    const cfg=JSON.parse((await run(compose(project,'config',['--format','json']),{cwd:project.workdir})).stdout);
-    if(configurationHash(cfg,policy.services)!==policy.configurationHash)throw Error('Deployment configuration differs from the approved policy');
-    const old={},desired={},protectedBefore={};
-    for(const service of policy.services){
-      const ref=cfg.services?.[service]?.image;
-      if(!pin.test(ref))throw Error('Application images must be pinned by digest');
-      if(policy.approvedImages?.[service]!==ref)throw Error('Application image is not the approved image');
-      old[service]=await inspect(service,project);
-      if(!pin.test(old[service].Config.Image))throw Error('Running application images must be pinned by digest');
-      if(!old[service].State.Running)throw Error('Current release is not running');
-      desired[service]=await image(service,ref,policy,emit);
+    if (project.hasSelf || project.files.length !== 1)
+      throw Error('Guarded updates require one compose file and cannot replace kissd itself');
+    const state = await sourceState(project);
+    const cfg = JSON.parse(
+      (await run(compose(project, 'config', ['--format', 'json']), { cwd: project.workdir }))
+        .stdout,
+    );
+    if (configurationHash(cfg, policy.services) !== policy.configurationHash)
+      throw Error('Deployment configuration differs from the approved policy');
+    const old = {},
+      desired = {},
+      protectedBefore = {};
+    for (const service of policy.services) {
+      const ref = cfg.services?.[service]?.image;
+      if (!pin.test(ref)) throw Error('Application images must be pinned by digest');
+      if (policy.approvedImages?.[service] !== ref)
+        throw Error('Application image is not the approved image');
+      old[service] = await inspect(service, project);
+      if (!pin.test(old[service].Config.Image))
+        throw Error('Running application images must be pinned by digest');
+      if (!old[service].State.Running) throw Error('Current release is not running');
+      desired[service] = await image(service, ref, policy, emit);
     }
-    for(const service of Object.keys(cfg.services).filter(s=>!policy.services.includes(s)))protectedBefore[service]=fingerprint(await inspect(service,project));
-    return {state,old,desired,protectedBefore,fileMode:(await fs.stat(project.files[0])).mode&0o777,
-      changed:policy.services.filter(s=>old[s].Image!==desired[s].Id)};
+    for (const service of Object.keys(cfg.services).filter((s) => !policy.services.includes(s)))
+      protectedBefore[service] = fingerprint(await inspect(service, project));
+    return {
+      state,
+      old,
+      desired,
+      protectedBefore,
+      fileMode: (await fs.stat(project.files[0])).mode & 0o777,
+      changed: policy.services.filter((s) => old[s].Image !== desired[s].Id),
+    };
   }
   async function protectedCheck(project, plan) {
-    for(const [service,value]of Object.entries(plan.protectedBefore))
-      if(JSON.stringify(fingerprint(await inspect(service,project)))!==JSON.stringify(value))throw Error('Protected service changed: '+service);
+    for (const [service, value] of Object.entries(plan.protectedBefore))
+      if (JSON.stringify(fingerprint(await inspect(service, project))) !== JSON.stringify(value))
+        throw Error('Protected service changed: ' + service);
   }
   async function order(project, policy) {
-    let value=policy.services;
-    if(policy.order){try{value=JSON.parse((await run(policy.order,{cwd:project.workdir,timeoutMs:10000})).stdout);}catch{throw Error('Deployment order check failed');}}
-    if(!Array.isArray(value)||value.length!==policy.services.length||new Set(value).size!==value.length||value.some(s=>!policy.services.includes(s)))throw Error('Invalid deployment order');
+    let value = policy.services;
+    if (policy.order) {
+      try {
+        value = JSON.parse(
+          (await run(policy.order, { cwd: project.workdir, timeoutMs: 10000 })).stdout,
+        );
+      } catch {
+        throw Error('Deployment order check failed');
+      }
+    }
+    if (
+      !Array.isArray(value) ||
+      value.length !== policy.services.length ||
+      new Set(value).size !== value.length ||
+      value.some((s) => !policy.services.includes(s))
+    )
+      throw Error('Invalid deployment order');
     return value;
   }
   async function backup(project, policy, plan, job, emit) {
-    const prior=oldCompose(plan.state[project.files[0]],plan.old);
-    await fs.writeFile(path.join(job.dir,'rollback-compose.yml'),prior,{mode:0o600});
-    for(const [file,value]of Object.entries(plan.state))if(value!==null)await fs.writeFile(path.join(job.dir,path.basename(file)+'.private'),value,{mode:0o600});
+    const prior = oldCompose(plan.state[project.files[0]], plan.old);
+    await fs.writeFile(path.join(job.dir, 'rollback-compose.yml'), prior, { mode: 0o600 });
+    for (const [file, value] of Object.entries(plan.state))
+      if (value !== null)
+        await fs.writeFile(path.join(job.dir, path.basename(file) + '.private'), value, {
+          mode: 0o600,
+        });
     emit('Backing up PostgreSQL…\n');
-    const database=(await inspect(policy.database,project)).Id;
-    const dump=path.join(job.dir,'database.dump');
+    const database = (await inspect(policy.database, project)).Id;
+    const dump = path.join(job.dir, 'database.dump');
     try {
-      const estimate=Number((await run(['docker','exec',database,'sh','-c','exec psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -At -v ON_ERROR_STOP=1 -c "SELECT pg_database_size(current_database());"'],{timeoutMs:10000})).stdout.trim());
-      const disk=await statfs(project.workdir);
-      if(!Number.isSafeInteger(estimate)||estimate<0||disk.bavail*disk.bsize<estimate*1.25+256*1024*1024)throw Error('Insufficient backup space');
-      await run(['docker','exec',database,'sh','-c','exec pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc'],{outputFile:dump,timeoutMs:120000});
-      await fs.chmod(dump,0o600);if(!(await fs.stat(dump)).size)throw Error();
-      await run(['docker','exec','-i',database,'pg_restore','--list'],{inputFile:dump,timeoutMs:30000});
-    }catch{throw Error('Database backup verification failed; no services changed');}
+      const estimate = Number(
+        (
+          await run(
+            [
+              'docker',
+              'exec',
+              database,
+              'sh',
+              '-c',
+              'exec psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -At -v ON_ERROR_STOP=1 -c "SELECT pg_database_size(current_database());"',
+            ],
+            { timeoutMs: 10000 },
+          )
+        ).stdout.trim(),
+      );
+      const disk = await statfs(project.workdir);
+      if (
+        !Number.isSafeInteger(estimate) ||
+        estimate < 0 ||
+        disk.bavail * disk.bsize < estimate * 1.25 + 256 * 1024 * 1024
+      )
+        throw Error('Insufficient backup space');
+      await run(
+        [
+          'docker',
+          'exec',
+          database,
+          'sh',
+          '-c',
+          'exec pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc',
+        ],
+        { outputFile: dump, timeoutMs: 120000 },
+      );
+      await fs.chmod(dump, 0o600);
+      if (!(await fs.stat(dump)).size) throw Error();
+      await run(['docker', 'exec', '-i', database, 'pg_restore', '--list'], {
+        inputFile: dump,
+        timeoutMs: 30000,
+      });
+    } catch {
+      throw Error('Database backup verification failed; no services changed');
+    }
     return prior;
   }
-  async function replace(project,policy,service,expected) {
-    await run(compose(project,'up',['-d','--no-deps','--pull','never',service]),{cwd:project.workdir,timeoutMs:180000});
-    await healthy(project,policy,service);
-    const current=await inspect(service,project);
-    if(current.Image!==expected||current.RestartCount!==0)throw Error('Image or restart verification failed');
+  async function replace(project, policy, service, expected) {
+    await run(compose(project, 'up', ['-d', '--no-deps', '--pull', 'never', service]), {
+      cwd: project.workdir,
+      timeoutMs: 180000,
+    });
+    await healthy(project, policy, service);
+    const current = await inspect(service, project);
+    if (current.Image !== expected || current.RestartCount !== 0)
+      throw Error('Image or restart verification failed');
   }
-  async function rollback(project,policy,plan,prior,touched,job,emit) {
+  async function rollback(project, policy, plan, prior, touched, job, emit) {
     // A failed journal write must never prevent an attempt to recover changed replicas.
-    try{await job.record({status:'rolling-back',touched:[...touched]});}catch{}
+    try {
+      await job.record({ status: 'rolling-back', touched: [...touched] });
+    } catch {}
     emit('Update failed. Rolling application images back…\n');
     try {
-      await unchanged(project,plan.state);await atomic(project.files[0],prior,plan.fileMode);
-      const state={...plan.state,[project.files[0]]:prior};
-      for(const service of [...touched].reverse()){
-        await unchanged(project,state);await replace(project,policy,service,plan.old[service].Image);
+      await unchanged(project, plan.state);
+      await atomic(project.files[0], prior, plan.fileMode);
+      const state = { ...plan.state, [project.files[0]]: prior };
+      for (const service of [...touched].reverse()) {
+        await unchanged(project, state);
+        await replace(project, policy, service, plan.old[service].Image);
       }
-      await protectedCheck(project,plan);
+      await protectedCheck(project, plan);
       emit('Previous application images restored. PostgreSQL data was not restored.\n');
-    }catch{
-      const error=Error('Automatic rollback could not complete. Manual recovery required; inspect '+job.dir);
-      error.recoveryRequired=true;throw error;
+    } catch {
+      const error = Error(
+        'Automatic rollback could not complete. Manual recovery required; inspect ' + job.dir,
+      );
+      error.recoveryRequired = true;
+      throw error;
     }
-    const error=Error('Update failed and was rolled back');error.rolledBack=true;throw error;
+    const error = Error('Update failed and was rolled back');
+    error.rolledBack = true;
+    throw error;
   }
-  async function execute(project,policy,emit,job) {
-    const plan=await prepare(project,policy,emit);
-    await check(policy.preflight,project);await healthy(project,policy);
-    if(!plan.changed.length){
-      await unchanged(project,plan.state);await protectedCheck(project,plan);
-      emit('Current pinned release is healthy. No services changed.\n');return;
+  async function execute(project, policy, emit, job) {
+    const plan = await prepare(project, policy, emit);
+    await check(policy.preflight, project);
+    await healthy(project, policy);
+    if (!plan.changed.length) {
+      await unchanged(project, plan.state);
+      await protectedCheck(project, plan);
+      emit('Current pinned release is healthy. No services changed.\n');
+      return;
     }
-    await order(project,policy);
-    const prior=await backup(project,policy,plan,job,emit);
-    await unchanged(project,plan.state);await protectedCheck(project,plan);await check(policy.preflight,project);
+    await order(project, policy);
+    const prior = await backup(project, policy, plan, job, emit);
+    await unchanged(project, plan.state);
+    await protectedCheck(project, plan);
+    await check(policy.preflight, project);
     // Re-read ownership after the backup, immediately before choosing the first replica.
-    const sequence=await order(project,policy);
-    await job.record({status:'backup-verified',order:sequence,previousImages:Object.fromEntries(Object.entries(plan.old).map(([s,x])=>[s,x.Config.Image]))});
+    const sequence = await order(project, policy);
+    await job.record({
+      status: 'backup-verified',
+      order: sequence,
+      previousImages: Object.fromEntries(
+        Object.entries(plan.old).map(([s, x]) => [s, x.Config.Image]),
+      ),
+    });
     emit('Database archive verified. Starting sequential update.\n');
-    const touched=[];
+    const touched = [];
     try {
-      for(const service of sequence.filter(s=>plan.changed.includes(s))){
-        await unchanged(project,plan.state);touched.push(service);
-        await job.record({status:'updating',service,touched:[...touched]});emit('Updating '+service+'…\n');
-        await replace(project,policy,service,plan.desired[service].Id);await protectedCheck(project,plan);
+      for (const service of sequence.filter((s) => plan.changed.includes(s))) {
+        await unchanged(project, plan.state);
+        touched.push(service);
+        await job.record({ status: 'updating', service, touched: [...touched] });
+        emit('Updating ' + service + '…\n');
+        await replace(project, policy, service, plan.desired[service].Id);
+        await protectedCheck(project, plan);
       }
-      await unchanged(project,plan.state);await protectedCheck(project,plan);emit('Guarded update passed all health checks.\n');
-    }catch(error){if(!touched.length)throw error;await rollback(project,policy,plan,prior,touched,job,emit);}
+      await unchanged(project, plan.state);
+      await protectedCheck(project, plan);
+      emit('Guarded update passed all health checks.\n');
+    } catch (error) {
+      if (!touched.length) throw error;
+      await rollback(project, policy, plan, prior, touched, job, emit);
+    }
   }
   return {
     async update(project, policy, onData) {
@@ -452,7 +577,14 @@ export function createGuardedUpdater({
           listeners: new Set([onData]),
           record: async (patch) => {
             Object.assign(journal, patch);
-            try{await writeJournal(path.join(dir,'status.json'),JSON.stringify(journal,null,2));}catch{job.journalFailed=true;const error=Error('Deployment journal write failed; manual recovery required');error.recoveryRequired=true;throw error;}
+            try {
+              await writeJournal(path.join(dir, 'status.json'), JSON.stringify(journal, null, 2));
+            } catch {
+              job.journalFailed = true;
+              const error = Error('Deployment journal write failed; manual recovery required');
+              error.recoveryRequired = true;
+              throw error;
+            }
           },
         };
         await job.record({});

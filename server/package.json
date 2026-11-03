@@ -10,7 +10,7 @@
   "scripts": {
     "start": "node src/index.js",
     "test": "node --test test/*.test.js",
-    "test:coverage": "node --test --experimental-test-coverage --test-coverage-include='src/metrics-*.js' --test-coverage-lines=80 --test-coverage-branches=80 --test-coverage-functions=80 test/*.test.js"
+    "test:coverage": "node --test --experimental-test-coverage --test-coverage-include='src/metrics-*.js' --test-coverage-include='src/guarded-updates.js' --test-coverage-include='src/deployment-guards.js' --test-coverage-include='src/loadout-policy.js' --test-coverage-lines=80 --test-coverage-branches=80 --test-coverage-functions=80 test/*.test.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

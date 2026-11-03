@@ -8,13 +8,13 @@ import ProjectUpdateControls from '../components/ProjectUpdateControls';
 export default function Compose() {
   const [params, setParams] = useSearchParams();
   const [projects, setProjects] = useState(null);
-  const [file, setFile] = useState(null);      // loaded file, as on disk
+  const [file, setFile] = useState(null); // loaded file, as on disk
   const [draft, setDraft] = useState('');
   const [status, setStatus] = useState(null);
   const [busy, setBusy] = useState(false);
   const [applying, setApplying] = useState(null);
   const [updating, setUpdating] = useState(null);
-  const [restarting, setRestarting] = useState(null);   // project awaiting confirmation
+  const [restarting, setRestarting] = useState(null); // project awaiting confirmation
   const [restartingRun, setRestartingRun] = useState(null);
   const [history, setHistory] = useState([]);
   const taRef = useRef(null);
@@ -22,7 +22,10 @@ export default function Compose() {
   const selectedPath = params.get('file') || '';
 
   useEffect(() => {
-    api.composeProjects().then(setProjects).catch((e) => setStatus({ type: 'err', text: e.message }));
+    api
+      .composeProjects()
+      .then(setProjects)
+      .catch((e) => setStatus({ type: 'err', text: e.message }));
   }, []);
 
   const openFile = useCallback(async (p) => {
@@ -31,7 +34,10 @@ export default function Compose() {
       const f = await api.composeFile(p);
       setFile(f);
       setDraft(f.content);
-      api.composeBackups(f.project).then(setHistory).catch(() => setHistory([]));
+      api
+        .composeBackups(f.project)
+        .then(setHistory)
+        .catch(() => setHistory([]));
     } catch (err) {
       setStatus({ type: 'err', text: err.message });
       setFile(null);
@@ -48,7 +54,7 @@ export default function Compose() {
   }, [projects, selectedPath]);
 
   const dirty = file && draft !== file.content;
-  const selectedPolicy=projects?.find(p=>p.project===file?.project)?.updatePolicy;
+  const selectedPolicy = projects?.find((p) => p.project === file?.project)?.updatePolicy;
 
   async function save({ thenApply } = {}) {
     if (!file) return;
@@ -60,10 +66,19 @@ export default function Compose() {
         setStatus({ type: 'ok', text: 'No changes to save.' });
       } else {
         setFile({ ...file, content: draft, mtimeMs: res.mtimeMs });
-        setStatus({ type: 'ok', text: `Saved. Previous version backed up to ${res.backup.split('/').pop()}.` });
-        api.composeBackups(file.project).then(setHistory).catch(() => {});
+        setStatus({
+          type: 'ok',
+          text: `Saved. Previous version backed up to ${res.backup.split('/').pop()}.`,
+        });
+        api
+          .composeBackups(file.project)
+          .then(setHistory)
+          .catch(() => {});
       }
-      if (thenApply) {if(selectedPolicy?.mode==='guarded')setUpdating(file.project);else setApplying(file.project);}
+      if (thenApply) {
+        if (selectedPolicy?.mode === 'guarded') setUpdating(file.project);
+        else setApplying(file.project);
+      }
     } catch (err) {
       // 422 means compose rejected it and the file was rolled back.
       const rolled = err.data?.rolledBack;
@@ -90,15 +105,25 @@ export default function Compose() {
       const { selectionStart: s, selectionEnd: en } = el;
       const next = `${draft.slice(0, s)}  ${draft.slice(en)}`;
       setDraft(next);
-      requestAnimationFrame(() => { el.selectionStart = el.selectionEnd = s + 2; });
+      requestAnimationFrame(() => {
+        el.selectionStart = el.selectionEnd = s + 2;
+      });
     }
   }
 
   if (!projects) {
     return (
       <>
-        <div className="page-head"><div><h1>Compose</h1></div></div>
-        {status ? <div className="notice err">{status.text}</div> : <p className="dim">Loading projects…</p>}
+        <div className="page-head">
+          <div>
+            <h1>Compose</h1>
+          </div>
+        </div>
+        {status ? (
+          <div className="notice err">{status.text}</div>
+        ) : (
+          <p className="dim">Loading projects…</p>
+        )}
       </>
     );
   }
@@ -110,27 +135,47 @@ export default function Compose() {
           <h1>Compose</h1>
           <p>
             {projects.length} project{projects.length === 1 ? '' : 's'}
-            {file && <> · editing <span className="mono">{file.path}</span></>}
+            {file && (
+              <>
+                {' '}
+                · editing <span className="mono">{file.path}</span>
+              </>
+            )}
           </p>
         </div>
         <div className="btn-row">
-          <button className="btn" disabled={!dirty || busy} onClick={() => { setDraft(file.content); setStatus(null); }}>
+          <button
+            className="btn"
+            disabled={!dirty || busy}
+            onClick={() => {
+              setDraft(file.content);
+              setStatus(null);
+            }}
+          >
             Revert
           </button>
           <button className="btn" disabled={!dirty || busy} onClick={() => save()}>
             {busy ? 'Saving…' : 'Save'}
           </button>
-          <button className="btn primary" disabled={busy || !file || selectedPolicy?.mode==='blocked'} onClick={() => save({ thenApply: true })}>
-            {selectedPolicy?.mode==='guarded'?'Save & guarded update':'Save & apply'}
+          <button
+            className="btn primary"
+            disabled={busy || !file || selectedPolicy?.mode === 'blocked'}
+            onClick={() => save({ thenApply: true })}
+          >
+            {selectedPolicy?.mode === 'guarded' ? 'Save & guarded update' : 'Save & apply'}
           </button>
         </div>
       </div>
 
       {status && (
-        <div className={`notice ${status.type}`} style={{ whiteSpace: 'pre-wrap' }}>{status.text}</div>
+        <div className={`notice ${status.type}`} style={{ whiteSpace: 'pre-wrap' }}>
+          {status.text}
+        </div>
       )}
       {file && !file.writable && (
-        <div className="notice warn">This file is not writable by kissd — you can view it but not save.</div>
+        <div className="notice warn">
+          This file is not writable by kissd — you can view it but not save.
+        </div>
       )}
 
       <div className="compose-layout">
@@ -139,9 +184,17 @@ export default function Compose() {
             <div key={p.project} className="compose-project">
               <div className="compose-project-head">
                 <strong>{p.project}</strong>
-                <span className="dim">{p.running}/{p.containers}</span>
+                <span className="dim">
+                  {p.running}/{p.containers}
+                </span>
                 <div className="btn-row" style={{ marginLeft: 'auto', gap: 4 }}>
-                  <ProjectUpdateControls project={p.project} policy={p.updatePolicy} short onUpdate={()=>setUpdating(p.project)} onRestart={()=>setRestarting(p)} />
+                  <ProjectUpdateControls
+                    project={p.project}
+                    policy={p.updatePolicy}
+                    short
+                    onUpdate={() => setUpdating(p.project)}
+                    onRestart={() => setRestarting(p)}
+                  />
                 </div>
               </div>
               <div className="dim mono compose-services">{p.services.join(', ')}</div>
@@ -149,7 +202,10 @@ export default function Compose() {
                 <button
                   key={f}
                   className={`compose-file${f === file?.path ? ' active' : ''}`}
-                  onClick={() => { setParams({ file: f }); openFile(f); }}
+                  onClick={() => {
+                    setParams({ file: f });
+                    openFile(f);
+                  }}
                 >
                   {f.replace(`${p.workdir}/`, '')}
                 </button>
@@ -171,7 +227,9 @@ export default function Compose() {
                 readOnly={!file.writable}
               />
               <div className="compose-foot dim">
-                <span>{draft.split('\n').length} lines · {bytes(new Blob([draft]).size)}</span>
+                <span>
+                  {draft.split('\n').length} lines · {bytes(new Blob([draft]).size)}
+                </span>
                 <span>{dirty ? 'Unsaved changes · ⌘/Ctrl+S to save' : 'Saved'}</span>
               </div>
             </>
@@ -192,8 +250,12 @@ export default function Compose() {
               <tbody>
                 {history.map((b) => (
                   <tr key={b.name}>
-                    <td className="dim" style={{ width: 190 }}>{new Date(b.at).toLocaleString()}</td>
-                    <td className="mono" style={{ fontSize: 11.5 }}>{b.name}</td>
+                    <td className="dim" style={{ width: 190 }}>
+                      {new Date(b.at).toLocaleString()}
+                    </td>
+                    <td className="mono" style={{ fontSize: 11.5 }}>
+                      {b.name}
+                    </td>
                     <td className="dim">{bytes(b.size)}</td>
                     <td style={{ width: 1 }}>
                       <button
@@ -201,7 +263,10 @@ export default function Compose() {
                         onClick={async () => {
                           const { content } = await api.composeBackup(file.project, b.name);
                           setDraft(content);
-                          setStatus({ type: 'warn', text: 'Backup loaded into the editor. Nothing is written until you save.' });
+                          setStatus({
+                            type: 'warn',
+                            text: 'Backup loaded into the editor. Nothing is written until you save.',
+                          });
                         }}
                       >
                         Load
@@ -239,7 +304,10 @@ export default function Compose() {
           services={restarting.services.length}
           hasSelf={restarting.hasSelf}
           onCancel={() => setRestarting(null)}
-          onConfirm={() => { setRestartingRun(restarting.project); setRestarting(null); }}
+          onConfirm={() => {
+            setRestartingRun(restarting.project);
+            setRestarting(null);
+          }}
         />
       )}
 
