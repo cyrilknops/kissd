@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { api, bytes } from '../api';
 import StreamModal from '../components/StreamModal';
 import ConfirmRestart from '../components/ConfirmRestart';
+import ProjectUpdateControls from '../components/ProjectUpdateControls';
 
 export default function Compose() {
   const [params, setParams] = useSearchParams();
@@ -47,6 +48,7 @@ export default function Compose() {
   }, [projects, selectedPath]);
 
   const dirty = file && draft !== file.content;
+  const selectedPolicy=projects?.find(p=>p.project===file?.project)?.updatePolicy;
 
   async function save({ thenApply } = {}) {
     if (!file) return;
@@ -61,7 +63,7 @@ export default function Compose() {
         setStatus({ type: 'ok', text: `Saved. Previous version backed up to ${res.backup.split('/').pop()}.` });
         api.composeBackups(file.project).then(setHistory).catch(() => {});
       }
-      if (thenApply) setApplying(file.project);
+      if (thenApply) {if(selectedPolicy?.mode==='guarded')setUpdating(file.project);else setApplying(file.project);}
     } catch (err) {
       // 422 means compose rejected it and the file was rolled back.
       const rolled = err.data?.rolledBack;
@@ -118,8 +120,8 @@ export default function Compose() {
           <button className="btn" disabled={!dirty || busy} onClick={() => save()}>
             {busy ? 'Saving…' : 'Save'}
           </button>
-          <button className="btn primary" disabled={busy || !file} onClick={() => save({ thenApply: true })}>
-            Save &amp; apply
+          <button className="btn primary" disabled={busy || !file || selectedPolicy?.mode==='blocked'} onClick={() => save({ thenApply: true })}>
+            {selectedPolicy?.mode==='guarded'?'Save & guarded update':'Save & apply'}
           </button>
         </div>
       </div>
@@ -139,20 +141,7 @@ export default function Compose() {
                 <strong>{p.project}</strong>
                 <span className="dim">{p.running}/{p.containers}</span>
                 <div className="btn-row" style={{ marginLeft: 'auto', gap: 4 }}>
-                  <button
-                    className="btn xs"
-                    title={`Pull and recreate all ${p.services.length} services in ${p.project}`}
-                    onClick={() => setUpdating(p.project)}
-                  >
-                    Update
-                  </button>
-                  <button
-                    className="btn xs"
-                    title={`Stop and start every container in ${p.project}, without pulling or recreating`}
-                    onClick={() => setRestarting(p)}
-                  >
-                    Restart
-                  </button>
+                  <ProjectUpdateControls project={p.project} policy={p.updatePolicy} short onUpdate={()=>setUpdating(p.project)} onRestart={()=>setRestarting(p)} />
                 </div>
               </div>
               <div className="dim mono compose-services">{p.services.join(', ')}</div>

@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { api, bytes, ago } from '../api';
 import StreamModal from '../components/StreamModal';
 import ConfirmRestart from '../components/ConfirmRestart';
+import ProjectUpdateControls from '../components/ProjectUpdateControls';
 import ContainerCpuInfo from '../components/ContainerCpuInfo';
 
 const UNGROUPED = '\u0000ungrouped'; // sorts last; never collides with a project name
@@ -126,20 +127,7 @@ function GroupHeader({ name, items, collapsed, onToggle, onUpdate, onRestart }) 
       </button>
       {isProject && (
         <div className="btn-row" style={{ gap: 6 }}>
-          <button
-            className="btn xs"
-            title={`Pull and recreate every service in ${name}`}
-            onClick={onUpdate}
-          >
-            Update all
-          </button>
-          <button
-            className="btn xs"
-            title={`Stop and start every container in ${name}, without pulling or recreating`}
-            onClick={onRestart}
-          >
-            Restart all
-          </button>
+          <ProjectUpdateControls project={name} policy={items[0]?.compose?.updatePolicy} onUpdate={onUpdate} onRestart={onRestart} />
         </div>
       )}
     </div>

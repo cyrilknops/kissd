@@ -122,7 +122,8 @@ app.get('/api/containers/:id', auth.requireAuth, async (req, res) => {
   try {
     const info = await dockerApi.detail(req.params.id);
     const stats = info.running ? await dockerApi.statsOne(info.id) : null;
-    return res.json({ ...info, stats });
+    const project=info.compose?(await compose.projects()).find(p=>p.project===info.compose.project):null;
+    return res.json({...info,stats,compose:info.compose?{...info.compose,updatePolicy:project?.updatePolicy}:null});
   } catch (err) {
     const missing = err.statusCode === 404;
     return res.status(missing ? 404 : 500).json({ error: missing ? 'No such container' : err.message });

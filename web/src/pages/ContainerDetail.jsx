@@ -128,8 +128,8 @@ export default function ContainerDetail({ onOpenShell }) {
           >
             Compose file
           </button>
-          <button className="btn sm primary" disabled={busy || !c.compose}
-                  title={c.compose ? 'docker compose pull && up -d' : 'Not compose-managed'}
+          <button className="btn sm primary" disabled={busy || !c.compose || Boolean(c.compose?.updatePolicy)}
+                  title={c.compose?.updatePolicy?'Use Guarded update on the project':c.compose?'docker compose pull && up -d':'Not compose-managed'}
                   onClick={runUpdate}>
             {busy === 'update' ? 'Updating…' : 'Update'}
           </button>

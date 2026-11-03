@@ -4,7 +4,7 @@ WORKDIR /web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
 COPY web/ ./
-RUN npm run build
+RUN npm test && npm run build
 
 # ---- server dependencies (node-pty needs a toolchain) ---------------------
 FROM node:22.23.4-alpine AS deps
