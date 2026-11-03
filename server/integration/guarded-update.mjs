@@ -221,7 +221,7 @@ try {
     '-v',
     'ON_ERROR_STOP=1',
     '-c',
-    "CREATE TABLE game(status text); CREATE TABLE marker(value text); INSERT INTO marker VALUES ('preserved');",
+    "CREATE TABLE game(status text); CREATE TABLE marker(value text); INSERT INTO marker VALUES ('preserved'); CREATE TABLE backup_payload AS SELECT i, repeat(md5(i::text),64) AS content FROM generate_series(1,20000) AS i;",
   );
   const dbBefore = await inspect(before.db);
   for (let i = 0; i < 50; i++) {
@@ -261,7 +261,7 @@ try {
   assert.equal(successJournal.status, 'succeeded');
   assert.deepEqual(successJournal.touched, ['api-b', 'api-a', 'web']);
   const archive = path.join(projectDir, '.kissd', successJournal.id, 'database.dump');
-  assert((await fs.stat(archive)).size > 0);
+  assert((await fs.stat(archive)).size > 512 * 1024, 'Archive must exceed the input pipe buffer');
   assert.equal((await fs.stat(archive)).mode & 0o777, 0o600);
   const afterSuccess = await ids();
   for (const service of ['api-a', 'api-b', 'web'])

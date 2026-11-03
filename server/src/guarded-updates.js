@@ -416,6 +416,7 @@ export function createGuardedUpdater({
     emit('Backing up PostgreSQL…\n');
     const database = (await inspect(policy.database, project)).Id;
     const dump = path.join(job.dir, 'database.dump');
+    let step = 'database size check';
     try {
       const estimate = Number(
         (
@@ -432,6 +433,7 @@ export function createGuardedUpdater({
           )
         ).stdout.trim(),
       );
+      step = 'free-space check';
       const disk = await statfs(project.workdir);
       if (
         !Number.isSafeInteger(estimate) ||
@@ -439,6 +441,7 @@ export function createGuardedUpdater({
         disk.bavail * disk.bsize < estimate * 1.25 + 256 * 1024 * 1024
       )
         throw Error('Insufficient backup space');
+      step = 'database dump';
       await run(
         [
           'docker',
@@ -450,14 +453,30 @@ export function createGuardedUpdater({
         ],
         { outputFile: dump, timeoutMs: 120000 },
       );
+      step = 'archive file check';
       await fs.chmod(dump, 0o600);
       if (!(await fs.stat(dump)).size) throw Error();
-      await run(['docker', 'exec', '-i', database, 'pg_restore', '--list'], {
-        inputFile: dump,
-        timeoutMs: 30000,
-      });
+      step = 'archive listing';
+      // --list reads the header/TOC and can exit before a large archive has
+      // finished streaming. Drain the rest so a valid dump cannot fail with
+      // EPIPE, while preserving pg_restore's exit status on invalid archives.
+      await run(
+        [
+          'docker',
+          'exec',
+          '-i',
+          database,
+          'sh',
+          '-c',
+          'pg_restore --list >/dev/null; result=$?; cat >/dev/null || exit 1; exit "$result"',
+        ],
+        {
+          inputFile: dump,
+          timeoutMs: 120000,
+        },
+      );
     } catch {
-      throw Error('Database backup verification failed; no services changed');
+      throw Error('Database backup verification failed during ' + step + '; no services changed');
     }
     return prior;
   }

@@ -77,7 +77,10 @@ PostgreSQL tools. It does not install host software or send release emails.
 3. Save private Compose/environment/policy snapshots and prepare the actual old
    running image pins for rollback. Check free space against PostgreSQL database
    size with additional headroom. Create a custom-format dump and verify its archive
-   using `pg_restore --list` before replacing any service.
+   using `pg_restore --list` before replacing any service. Archive listing reads only
+   the header/table of contents; its input is drained after the command exits so a
+   larger valid dump does not cause a broken-pipe failure. A nonzero listing result
+   still blocks the update. This check does not perform a full restore rehearsal.
 4. In latest mode, write the resolved application pins to the Compose file only
    after backup verification. Replace each selected service with
    `up -d --no-deps --pull never`. Wait for its
@@ -97,6 +100,11 @@ second replacement sequence. Maintenance and deployment startup reserve their wo
 before awaiting filesystem or Docker operations.
 
 ## Recovery and limits
+
+Backup failures identify the failed step (database size, free space, dump creation,
+archive file checks or archive listing). The dashboard never exposes command stderr
+or database object names. A backup failure leaves application containers and Compose
+image pins unchanged; diagnose that step and retry after correcting its cause.
 
 Closing the browser does not cancel a running deployment. A private `.kissd/`
 directory in the project contains a per-run `status.json`, configuration snapshots,
@@ -139,7 +147,8 @@ Never set these on the live panel. Supply the workspace path
 installed registry image ID as its three arguments.
 
 The check creates a local-only temporary registry, tiny API/web fixtures and a real
-PostgreSQL database. It exercises successful sequential replacement, verified backup,
+PostgreSQL database with an archive larger than the input pipe buffer. It exercises
+successful sequential replacement, verified backup,
 a healthy no-op, refusal of bypass controls, failed-health rollback, and preservation
 of database writes made during rollback. It cleans up its uniquely named stack and
 registry. The production database and application projects are not test targets.
