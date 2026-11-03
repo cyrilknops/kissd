@@ -2,12 +2,15 @@
 const digest = /^([a-zA-Z0-9][a-zA-Z0-9._:/-]*)@sha256:[a-f0-9]{64}$/;
 const latest = /^([a-zA-Z0-9][a-zA-Z0-9._:/-]*):latest$/;
 export function validTracking(policy) {
-  return policy.imageTags && typeof policy.imageTags === 'object' &&
+  return (
+    policy.imageTags &&
+    typeof policy.imageTags === 'object' &&
     Object.keys(policy.imageTags).length === policy.services.length &&
-    policy.services.every(s => {
+    policy.services.every((s) => {
       const tag = latest.exec(policy.imageTags[s] || '');
       return tag && tag[1] === digest.exec(policy.approvedImages?.[s] || '')?.[1];
-    });
+    })
+  );
 }
 export async function resolveLatest(policy, config, run, emit) {
   if (!validTracking(policy)) throw Error('Latest tracking requires approved repositories');
@@ -21,25 +24,34 @@ export async function resolveLatest(policy, config, run, emit) {
   let revision;
   for (const tag of new Set(Object.values(policy.imageTags))) {
     emit('Fetching latest application image…\n');
-    try { await run(['docker','pull',tag],{timeoutMs:300000}); }
-    catch { throw Error('Latest image pull failed; no services changed'); }
-    const value = JSON.parse((await run(['docker','image','inspect',tag])).stdout)[0];
+    try {
+      await run(['docker', 'pull', tag], { timeoutMs: 300000 });
+    } catch {
+      throw Error('Latest image pull failed; no services changed');
+    }
+    const value = JSON.parse((await run(['docker', 'image', 'inspect', tag])).stdout)[0];
     const repo = latest.exec(tag)[1];
-    const refs = [...new Set((value?.RepoDigests || []).filter(x => digest.exec(x)?.[1] === repo))];
+    const refs = [
+      ...new Set((value?.RepoDigests || []).filter((x) => digest.exec(x)?.[1] === repo)),
+    ];
     if (refs.length !== 1 || !/^sha256:[a-f0-9]{64}$/.test(value?.Id || ''))
       throw Error('Latest image has no unambiguous immutable digest');
     const ref = refs[0];
-    const pinned = JSON.parse((await run(['docker','image','inspect',ref])).stdout)[0];
+    const pinned = JSON.parse((await run(['docker', 'image', 'inspect', ref])).stdout)[0];
     if (pinned?.Id !== value.Id) throw Error('Latest image digest verification failed');
     const current = value.Config?.Labels?.['org.opencontainers.image.revision'];
     if (!/^[a-f0-9]{40}$/.test(current || '') || (revision && revision !== current))
       throw Error('Latest application images do not identify the same release revision');
     revision = current;
-    resolved.set(tag,{ref,image:value});
+    resolved.set(tag, { ref, image: value });
   }
   return {
     revision,
-    refs:Object.fromEntries(policy.services.map(s=>[s,resolved.get(policy.imageTags[s]).ref])),
-    images:Object.fromEntries(policy.services.map(s=>[s,resolved.get(policy.imageTags[s]).image])),
+    refs: Object.fromEntries(
+      policy.services.map((s) => [s, resolved.get(policy.imageTags[s]).ref]),
+    ),
+    images: Object.fromEntries(
+      policy.services.map((s) => [s, resolved.get(policy.imageTags[s]).image]),
+    ),
   };
 }

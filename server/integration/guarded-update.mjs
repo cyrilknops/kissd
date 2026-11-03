@@ -48,6 +48,7 @@ const ids = async () =>
 const imageRefs = [];
 const stages = [];
 let registry;
+let latestTag;
 let cookie;
 let configuration;
 const admin = 'http://127.0.0.1:' + Number(process.env.PORT || 8090);
@@ -60,8 +61,8 @@ const post = async (p, body) =>
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const source = `import http from 'node:http';import os from 'node:os';http.createServer((req,res)=>{if(process.env.VERSION==='bad'&&process.env.ROLE==='api-b'){res.statusCode=503;}res.setHeader('Content-Type','application/json');res.end(JSON.stringify({status:res.statusCode===200?'ok':'unavailable',service:'loadout-api',version:process.env.VERSION,cluster:{instanceId:os.hostname(),leader:process.env.ROLE==='api-a'}}));}).listen(3000,'0.0.0.0');`;
 const health = `const rows=await Promise.all(['api-a','api-b','web'].map(async name=>{const r=await fetch('http://'+name+':3000/api/health',{signal:AbortSignal.timeout(1000)});if(!r.ok)throw Error('not ready');return r.json()}));if(new Set(rows.slice(0,2).map(x=>x.cluster.instanceId)).size!==2||rows.slice(0,2).filter(x=>x.cluster.leader).length!==1)throw Error('quorum');console.log('ready');`;
-async function approve(revision, ref) {
-  for (const s of ['api-a', 'api-b', 'web']) configuration.services[s].image = ref;
+async function approve(revision, ref, latest = false) {
+  if (!latest) for (const s of ['api-a', 'api-b', 'web']) configuration.services[s].image = ref;
   const temp = file + '.tmp';
   await fs.writeFile(temp, JSON.stringify(configuration), { mode: 0o600 });
   await fs.rename(temp, file);
@@ -72,7 +73,12 @@ async function approve(revision, ref) {
     services: ['api-a', 'api-b', 'web'],
     database: 'db',
     approvedRevision: revision,
-    approvedImages: { 'api-a': ref, 'api-b': ref, web: ref },
+    approvedImages: Object.fromEntries(
+      ['api-a', 'api-b', 'web'].map((s) => [s, configuration.services[s].image]),
+    ),
+    ...(latest
+      ? { imageTags: Object.fromEntries(['api-a', 'api-b', 'web'].map((s) => [s, latestTag])) }
+      : {}),
     configurationHash: configurationHash(effective, ['api-a', 'api-b', 'web']),
     attempts: 5,
     intervalMs: 100,
@@ -147,6 +153,7 @@ try {
   );
   const port = (await inspect(registry)).NetworkSettings.Ports['5000/tcp'][0].HostPort;
   const repository = '127.0.0.1:' + port + '/fixture';
+  latestTag = repository + ':latest';
   for (const [version, revision] of [
     ['old', 'f'.repeat(40)],
     ['new', 'e'.repeat(40)],
@@ -233,8 +240,21 @@ try {
   assert.equal(login.status, 200);
   cookie = login.headers.get('set-cookie').split(';')[0];
   const current = imageRefs.find((x) => x.version === 'new');
-  await approve(current.revision, current.ref);
-  const success = await update();
+  const bad = imageRefs.find((x) => x.version === 'bad');
+  const publish = async (ref) => {
+    await docker('tag', ref, latestTag);
+    await docker('push', latestTag);
+  };
+  await publish(current.ref);
+  await approve(current.revision, current.ref, true);
+  const policyBefore = await fs.readFile(path.join(projectDir, 'kissd-update.json'), 'utf8');
+  let moved = false;
+  const success = await update(async (chunk) => {
+    if (!moved && chunk.includes('Updating api-b')) {
+      moved = true;
+      await publish(bad.ref);
+    }
+  });
   assert.match(success, /Guarded update passed/);
   assert.match(success, /Update complete/);
   const successJournal = await journal();
@@ -247,12 +267,17 @@ try {
   for (const service of ['api-a', 'api-b', 'web'])
     assert.notEqual(afterSuccess[service], before[service]);
   assert.equal(afterSuccess.db, before.db);
+  for (const service of ['api-a', 'api-b', 'web'])
+    assert.equal((await inspect(afterSuccess[service])).Image, (await inspect(current.ref)).Id);
+  assert(moved, 'Latest tag moved while the frozen release was deploying');
   stages.push({
     stage: 'successful-update',
     order: successJournal.touched,
     archiveBytes: (await fs.stat(archive)).size,
     protectedDatabaseUnchanged: true,
+    latestMovedDuringDeployment: moved,
   });
+  await publish(current.ref);
   const noOp = await update();
   assert.match(noOp, /No services changed/);
   assert.deepEqual(await ids(), afterSuccess);
@@ -261,8 +286,7 @@ try {
   assert.equal(blocked.status, 409);
   assert.match(await (await post('/api/compose/restart', { project: name })).text(), /guarded/);
   stages.push({ stage: 'bypass-refused', status: blocked.status });
-  const bad = imageRefs.find((x) => x.version === 'bad');
-  await approve(bad.revision, bad.ref);
+  await publish(bad.ref);
   let inserted = false;
   const failed = await update(async (chunk) => {
     if (!inserted && chunk.includes('Rolling application')) {
@@ -311,10 +335,25 @@ try {
     restoredRelease: current.revision,
     databaseWritesPreserved: inserted,
   });
+  assert.equal(
+    await fs.readFile(path.join(projectDir, 'kissd-update.json'), 'utf8'),
+    policyBefore,
+    'New releases require no new approval',
+  );
+  const beforePullFailure = await ids();
+  const sourceBeforePullFailure = await fs.readFile(file, 'utf8');
+  await docker('stop', registry);
+  const pullFailure = await update();
+  assert.match(pullFailure, /Latest image pull failed/);
+  assert.doesNotMatch(pullFailure, /Update complete/);
+  assert.deepEqual(await ids(), beforePullFailure);
+  assert.equal(await fs.readFile(file, 'utf8'), sourceBeforePullFailure);
+  stages.push({ stage: 'registry-pull-failure', containersAndSourceUnchanged: true });
   console.log(JSON.stringify({ passed: true, project: name, stages }));
 } finally {
   if (configuration) await docker(...flags, 'down', '-v', '--remove-orphans').catch(() => {});
   if (registry) await docker('rm', '-fv', registry).catch(() => {});
+  if (latestTag) await docker('image', 'rm', latestTag).catch(() => {});
   for (const image of imageRefs) {
     await docker('image', 'rm', image.tag).catch(() => {});
     await docker('image', 'rm', image.ref).catch(() => {});

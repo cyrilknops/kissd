@@ -23,7 +23,13 @@ export default function ProjectUpdateControls({
               : `Pull and recreate services in ${project}`
         }
       >
-        {guarded ? policy.tracksLatest ? 'Update latest' : 'Guarded update' : short ? 'Update' : 'Update all'}
+        {guarded
+          ? policy.tracksLatest
+            ? 'Update latest'
+            : 'Guarded update'
+          : short
+            ? 'Update'
+            : 'Update all'}
       </button>
       <button
         className="btn xs"

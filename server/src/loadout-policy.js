@@ -26,11 +26,18 @@ export function buildLoadoutPolicy({ prefix, origin, revision, config, ciRun, la
     services,
     database,
     approvedImages: Object.fromEntries(services.map((s) => [s, config.services?.[s]?.image])),
-    ...(latest ? {imageTags:Object.fromEntries(services.map(s=>{
-      const ref=config.services?.[s]?.image;
-      if (!/^.+@sha256:[a-f0-9]{64}$/.test(ref || '')) throw Error('Pin the initial deployment before enabling latest');
-      return [s,ref.split('@')[0]+':latest'];
-    }))}:{}),
+    ...(latest
+      ? {
+          imageTags: Object.fromEntries(
+            services.map((s) => {
+              const ref = config.services?.[s]?.image;
+              if (!/^.+@sha256:[a-f0-9]{64}$/.test(ref || ''))
+                throw Error('Pin the initial deployment before enabling latest');
+              return [s, ref.split('@')[0] + ':latest'];
+            }),
+          ),
+        }
+      : {}),
     configurationHash: configurationHash(config, services),
     preflight: [
       {

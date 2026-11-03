@@ -326,10 +326,12 @@ application services one at a time, checks health, and rolls application images 
 on failure. Running deployments block conflicting maintenance and retain a private
 recovery journal if recovery needs attention.
 
-The button keeps an already deployed pinned release unchanged. New releases need
-explicit owner approval after CI and database-compatibility review; the panel does
-not automatically select `latest`. Other projects retain their normal controls,
-with failed image pulls now stopping the update. See the
+Opt into `latest` tracking once to get an **Update latest** button. Each click pulls
+the application tags, freezes matching release digests, and uses the guarded path.
+No release-by-release approval is needed. Existing pinned policies keep their
+explicit approval behavior. The publishing pipeline must keep `latest` compatible
+with the existing database; schema-breaking releases need separate handling.
+Other projects retain their normal controls, with failed image pulls stopping the update. See the
 [setup, approval and recovery guide](docs/guarded-updates.md).
 
 ## 🔁 Restart all

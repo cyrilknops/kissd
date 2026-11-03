@@ -126,7 +126,12 @@ export async function policySummary(project) {
   try {
     const p = await readPolicy(project);
     return p
-      ? { mode: 'guarded', services: p.services, approvedRevision: p.approvedRevision, tracksLatest: Boolean(p.imageTags) }
+      ? {
+          mode: 'guarded',
+          services: p.services,
+          approvedRevision: p.approvedRevision,
+          tracksLatest: Boolean(p.imageTags),
+        }
       : null;
   } catch {
     return { mode: 'blocked', message: 'Update policy needs attention' };
@@ -271,7 +276,10 @@ async function unchanged(project, state) {
     );
 }
 function oldCompose(source, old) {
-  return pinnedCompose(source, Object.fromEntries(Object.entries(old).map(([s,x])=>[s,x.Config.Image])));
+  return pinnedCompose(
+    source,
+    Object.fromEntries(Object.entries(old).map(([s, x]) => [s, x.Config.Image])),
+  );
 }
 function pinnedCompose(source, refs) {
   if (source.trimStart().startsWith('{')) {
@@ -492,7 +500,8 @@ export function createGuardedUpdater({
   }
   async function execute(project, policy, emit, job) {
     const plan = await prepare(project, policy, emit);
-    if (plan.latest) await job.record({revision:plan.latest.revision,targetImages:plan.latest.refs});
+    if (plan.latest)
+      await job.record({ revision: plan.latest.revision, targetImages: plan.latest.refs });
     await check(policy.preflight, project);
     await healthy(project, policy);
     if (!plan.changed.length) {
@@ -518,9 +527,9 @@ export function createGuardedUpdater({
     emit('Database archive verified. Starting sequential update.\n');
     if (plan.latest) {
       const source = pinnedCompose(plan.state[project.files[0]], plan.latest.refs);
-      await unchanged(project,plan.state);
-      await atomic(project.files[0],source,plan.fileMode);
-      plan.state = {...plan.state,[project.files[0]]:source};
+      await unchanged(project, plan.state);
+      await atomic(project.files[0], source, plan.fileMode);
+      plan.state = { ...plan.state, [project.files[0]]: source };
     }
     const touched = [];
     try {
