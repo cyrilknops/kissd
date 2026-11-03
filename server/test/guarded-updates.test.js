@@ -14,7 +14,7 @@ async function fixture(t, options={}) {
  const config={name:'fixture',services:{db:{image:'postgres:16-alpine'},'api-a':{image:ref('c'),environment:{TRACE_RATE:'0.01'}},'api-b':{image:ref('c'),environment:{TRACE_RATE:'0.01'}},web:{image:ref('d')}}};
  await fs.writeFile(file,JSON.stringify(config),{mode:0o600});await fs.writeFile(path.join(dir,'.env'),'PRIVATE=fixture-secret\n',{mode:0o600});
  const services=['api-a','api-b','web'];
- const policy={version:1,backwardCompatible:true,services,database:'db',approvedRevision:rev,configurationHash:module.configurationHash(config,services),preflight:[{name:'No active games',argv:['fixture-preflight'],expect:'0'}],health:[{name:'Quorum and public routes',argv:['fixture-health'],expect:'ready'}],order:['fixture-order'],attempts:2,intervalMs:1};
+ const policy={version:1,backwardCompatible:true,services,database:'db',approvedRevision:rev,approvedImages:Object.fromEntries(services.map(n=>[n,config.services[n].image])),configurationHash:module.configurationHash(config,services),preflight:[{name:'No active games',argv:['fixture-preflight'],expect:'0'}],health:[{name:'Quorum and public routes',argv:['fixture-health'],expect:'ready'}],order:['fixture-order'],attempts:2,intervalMs:1};
  const containers=Object.fromEntries(['db',...services].map(n=>[n,{Id:n,Image:'sha256:'+((n==='web'?'b':'a').repeat(64)),RestartCount:0,State:{Running:true,StartedAt:'before',Health:{Status:'healthy'}},Config:{Image:n==='db'?'postgres:16-alpine':ref(n==='web'?'b':'a'),Labels:{'org.opencontainers.image.revision':'f'.repeat(40)}},Mounts:[]}]));
  const calls=[];let healthFailures=0;
  const run=async(argv,opts={})=>{
@@ -32,6 +32,7 @@ async function fixture(t, options={}) {
   if(argv[1]==='pull')throw Error('pull failed: fixture-private-detail');
   if(argv.includes('config'))return {stdout:JSON.stringify(JSON.parse(await fs.readFile(file,'utf8')))};
   if(argv.some(a=>a.includes('pg_dump'))){if(options.backupFail)throw Error('backup failed');await fs.writeFile(opts.outputFile,'verified archive');return {stdout:''};}
+  if(argv.some(a=>a.includes('pg_database_size')))return {stdout:'1024'};
   if(argv.includes('pg_restore'))return {stdout:'archive list'};
   if(argv.includes('up')){
    const service=argv.at(-1);const cfg=JSON.parse(await fs.readFile(file,'utf8'));containers[service].Config.Image=cfg.services[service].image;containers[service].Image='sha256:'+cfg.services[service].image.split(':').at(-1);containers[service].State.StartedAt='after';
@@ -42,7 +43,7 @@ async function fixture(t, options={}) {
   throw Error('Unexpected fixture command '+argv.join(' '));
  };
  const project={project:'fixture',workdir:dir,files:[file],services:['db',...services],hasSelf:false};
- const updater=module.createGuardedUpdater({run,inspect:async service=>structuredClone(containers[service]),sleep:async()=>{}});
+ const updater=module.createGuardedUpdater({run,inspect:async service=>structuredClone(containers[service]),sleep:async()=>{},statfs:options.noSpace?async()=>({bavail:0,bsize:4096}):undefined});
  return {dir,file,config,policy,project,updater,containers,calls,healthFailures:()=>healthFailures};
 }
 test('guarded update backs up before sequential replacements, excludes DB and preserves configuration',async t=>{
@@ -114,3 +115,6 @@ test('external configuration changes keep recovery locked and are never overwrit
  const f=await fixture(t,{drift:true});await assert.rejects(f.updater.update(f.project,f.policy,()=>{}),/Manual recovery/i);
  assert.equal(await fs.readFile(path.join(f.dir,'.env'),'utf8'),'OWNER_EDIT=preserved\n');await assert.rejects(module.assertIdle(f.project),/recovery/i);
 });
+
+test('an approved source revision cannot be used with different unapproved image digests',async t=>{const f=await fixture(t);f.config.services['api-a'].image=ref('g');await fs.writeFile(f.file,JSON.stringify(f.config));await assert.rejects(f.updater.update(f.project,f.policy,()=>{}),/approved.*image|image.*approved/i);assert.equal(f.calls.some(a=>a.includes('up')),false);});
+test('insufficient backup space stops before database dumping or container changes',async t=>{const f=await fixture(t,{noSpace:true});await assert.rejects(f.updater.update(f.project,f.policy,()=>{}),/space|backup/i);assert.equal(f.calls.some(a=>a.includes('up')||a.some(v=>v.includes('pg_dump'))),false);});
