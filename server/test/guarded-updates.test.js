@@ -19,7 +19,7 @@ async function fixture(t, options={}) {
  const calls=[];let healthFailures=0;
  const run=async(argv,opts={})=>{
   calls.push([...argv]);
-  if(argv[0]==='fixture-preflight')return {stdout:options.active?'1':'0'};
+  if(argv[0]==='fixture-preflight'){if(options.barrier)await options.barrier;return {stdout:options.active?'1':'0'};}
   if(argv[0]==='fixture-health'){
    if(options.healthFail && containers['api-a'].Config.Image===ref('c')){healthFailures++;throw Error('unhealthy');}
    return {stdout:'ready'};
@@ -35,6 +35,7 @@ async function fixture(t, options={}) {
   if(argv.includes('pg_restore'))return {stdout:'archive list'};
   if(argv.includes('up')){
    const service=argv.at(-1);const cfg=JSON.parse(await fs.readFile(file,'utf8'));containers[service].Config.Image=cfg.services[service].image;containers[service].Image='sha256:'+cfg.services[service].image.split(':').at(-1);containers[service].State.StartedAt='after';
+   if(options.drift && service==='api-b')await fs.writeFile(path.join(dir,'.env'),'OWNER_EDIT=preserved\n');
    if(options.upFail && service==='api-b' && cfg.services[service].image===ref('c'))throw Error('recreate failed after replacing service');
    return {stdout:''};
   }
@@ -88,4 +89,28 @@ test('a listener disconnected from the browser cannot abort the deployment',asyn
 test('valid policies, nested symlinks, and policy validation errors stay distinct',async t=>{
  const f=await fixture(t);const p=path.join(f.dir,'kissd-update.json');await fs.writeFile(p,JSON.stringify(f.policy),{mode:0o600});assert.equal((await module.readPolicy(f.project)).approvedRevision,rev);
  await fs.unlink(p);await fs.symlink(f.file,p);await assert.rejects(module.readPolicy(f.project),/policy/i);
+});
+
+test('command runner captures bounded stdout without leaking stderr and streams private backups',async t=>{
+ assert.ok(module);const dir=await fs.mkdtemp(path.join(os.tmpdir(),'kissd-command-'));t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+ assert.equal((await module.runCommand([process.execPath,'-e','process.stdout.write("ready");process.stderr.write("private-token")'])).stdout,'ready');
+ await assert.rejects(module.runCommand([process.execPath,'-e','process.stderr.write("private-token");process.exit(2)']),e=>!e.message.includes('private-token'));
+ await assert.rejects(module.runCommand([process.execPath,'-e','setTimeout(()=>{},10000)'],{timeoutMs:20}));
+ await assert.rejects(module.runCommand(['/missing/fixture-command']));
+ await assert.rejects(module.runCommand([process.execPath,'-e','process.stdout.write("x".repeat(3*1024*1024))']));
+ const output=path.join(dir,'archive');await module.runCommand([process.execPath,'-e','process.stdout.write("backup")'],{outputFile:output});assert.equal((await fs.stat(output)).mode&0o777,0o600);
+ assert.equal((await module.runCommand([process.execPath,'-e','process.stdin.pipe(process.stdout)'],{inputFile:output})).stdout,'backup');
+});
+
+test('two update requests attach to one deployment instead of replacing each replica twice',async t=>{
+ let release;const barrier=new Promise(resolve=>{release=resolve;});const f=await fixture(t,{barrier});
+ const first=f.updater.update(f.project,f.policy,()=>{});
+ for(let i=0;i<100&&!f.calls.some(a=>a[0]==='fixture-preflight');i++)await new Promise(resolve=>setTimeout(resolve,2));
+ await assert.rejects(module.assertIdle(f.project),/running/);
+ const second=f.updater.update(f.project,f.policy,()=>{});release();await Promise.all([first,second]);assert.equal(f.calls.filter(a=>a.includes('up')).length,3);
+});
+
+test('external configuration changes keep recovery locked and are never overwritten by rollback',async t=>{
+ const f=await fixture(t,{drift:true});await assert.rejects(f.updater.update(f.project,f.policy,()=>{}),/Manual recovery/i);
+ assert.equal(await fs.readFile(path.join(f.dir,'.env'),'utf8'),'OWNER_EDIT=preserved\n');await assert.rejects(module.assertIdle(f.project),/recovery/i);
 });
