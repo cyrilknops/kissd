@@ -149,6 +149,7 @@ test('guarded update backs up before sequential replacements, excludes DB and pr
   assert(backupIndex >= 0 && backupIndex < f.calls.findIndex((a) => a.includes('up')));
   assert(f.calls.some((a) => a.includes('pg_restore')));
   assert.equal(f.containers.db.State.StartedAt, 'before');
+  assert.equal((await fs.readFile(path.join(f.dir,'.kissd','.gitignore'),'utf8')).trim(),'*');
   assert.equal(await fs.readFile(f.file, 'utf8'), JSON.stringify(f.config));
   assert(!messages.join('').includes('fixture-secret'));
 });
