@@ -71,3 +71,21 @@ test('policy parsing rejects malformed, oversized and writable policies without 
  for(const value of ['{invalid',JSON.stringify({version:1,services:[]}), 'x'.repeat(70000)]){await fs.writeFile(p,value,{mode:0o600});await assert.rejects(module.readPolicy(f.project),/policy/i);}
  await fs.writeFile(p,JSON.stringify(f.policy));await fs.chmod(p,0o666);await assert.rejects(module.readPolicy(f.project),/policy/i);
 });
+
+test('the durable journal records the touched service before a replacement can fail',async t=>{
+ const f=await fixture(t,{upFail:true});await assert.rejects(f.updater.update(f.project,f.policy,()=>{}),/rolled back/i);
+ const files=await fs.readdir(path.join(f.dir,'.kissd'));const jobs=files.filter(x=>!x.includes('.'));
+ assert.equal(jobs.length,1);const status=JSON.parse(await fs.readFile(path.join(f.dir,'.kissd',jobs[0],'status.json'),'utf8'));
+ assert.equal(status.status,'rolled-back');assert.deepEqual(status.touched,['api-b']);assert.equal(status.revision,rev);
+});
+test('a stale deployment lock blocks every new mutation after a process restart',async t=>{
+ const f=await fixture(t);await fs.mkdir(path.join(f.dir,'.kissd'),{mode:0o700});await fs.writeFile(path.join(f.dir,'.kissd','update.lock'),'interrupted',{mode:0o600});
+ await assert.rejects(module.assertIdle(f.project),/recovery/i);await assert.rejects(f.updater.update(f.project,f.policy,()=>{}),/recovery/i);assert.equal(f.calls.length,0);
+});
+test('a listener disconnected from the browser cannot abort the deployment',async t=>{
+ const f=await fixture(t);await f.updater.update(f.project,f.policy,()=>{throw Error('disconnected');});assert.equal(f.containers.web.Config.Image,ref('d'));
+});
+test('valid policies, nested symlinks, and policy validation errors stay distinct',async t=>{
+ const f=await fixture(t);const p=path.join(f.dir,'kissd-update.json');await fs.writeFile(p,JSON.stringify(f.policy),{mode:0o600});assert.equal((await module.readPolicy(f.project)).approvedRevision,rev);
+ await fs.unlink(p);await fs.symlink(f.file,p);await assert.rejects(module.readPolicy(f.project),/policy/i);
+});
