@@ -6,9 +6,23 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { docker, composeInfo, updateSelfDetached, restartSelfDetached, SELF_NAME } from './docker.js';
+import {
+  docker,
+  composeInfo,
+  updateSelfDetached,
+  restartSelfDetached,
+  SELF_NAME,
+} from './docker.js';
 import * as registry from './registry.js';
-import {readPolicy,policySummary,assertIdle,assertPlainAction,createGuardedUpdater,runCommand,withMaintenance} from './guarded-updates.js';
+import {
+  readPolicy,
+  policySummary,
+  assertIdle,
+  assertPlainAction,
+  createGuardedUpdater,
+  runCommand,
+  withMaintenance,
+} from './guarded-updates.js';
 
 const DATA_DIR = process.env.DATA_DIR || '/data';
 const BACKUP_DIR = path.join(DATA_DIR, 'compose-backups');
@@ -43,8 +57,14 @@ export async function projects() {
     if ((c.Names || []).some((n) => n.replace(/^\//, '') === SELF_NAME)) entry.hasSelf = true;
   }
 
-  const result=[...map.values()].map(e=>({...e,services:[...e.services].sort(),files:e.files.sort()}));
-  return (await Promise.all(result.map(async p=>({...p,updatePolicy:await policySummary(p)})))).sort((a,b)=>a.project.localeCompare(b.project));
+  const result = [...map.values()].map((e) => ({
+    ...e,
+    services: [...e.services].sort(),
+    files: e.files.sort(),
+  }));
+  return (
+    await Promise.all(result.map(async (p) => ({ ...p, updatePolicy: await policySummary(p) })))
+  ).sort((a, b) => a.project.localeCompare(b.project));
 }
 
 // The set of files that may be touched, straight from the live labels.
@@ -76,7 +96,10 @@ export async function read(filePath) {
     content,
     // Used to detect edits made elsewhere between load and save.
     mtimeMs: stat.mtimeMs,
-    writable: await fs.access(filePath, fs.constants.W_OK).then(() => true, () => false),
+    writable: await fs.access(filePath, fs.constants.W_OK).then(
+      () => true,
+      () => false,
+    ),
   };
 }
 
@@ -84,8 +107,12 @@ function runCompose(args, cwd) {
   return new Promise((resolve) => {
     let out = '';
     const child = spawn('docker', args, { cwd, env: registry.env() });
-    child.stdout.on('data', (d) => { out += d.toString(); });
-    child.stderr.on('data', (d) => { out += d.toString(); });
+    child.stdout.on('data', (d) => {
+      out += d.toString();
+    });
+    child.stderr.on('data', (d) => {
+      out += d.toString();
+    });
     child.on('error', (err) => resolve({ code: 1, out: err.message }));
     child.on('close', (code) => resolve({ code: code ?? 1, out }));
   });
@@ -169,7 +196,10 @@ function streamSteps(project, steps, onData) {
       const child = spawn('docker', args, { cwd: project.workdir, env: registry.env() });
       child.stdout.on('data', (d) => onData(d.toString()));
       child.stderr.on('data', (d) => onData(d.toString()));
-      child.on('error', (err) => { onData(`\nfailed to run docker: ${err.message}\n`); resolve(1); });
+      child.on('error', (err) => {
+        onData(`\nfailed to run docker: ${err.message}\n`);
+        resolve(1);
+      });
       child.on('close', (code) => {
         if (code !== 0) return resolve(code ?? 1);
         runStep(idx + 1);
@@ -182,7 +212,11 @@ function streamSteps(project, steps, onData) {
 // Streams `docker compose up -d` for the whole project.
 export async function apply(projectName, onData) {
   const project = await findProject(projectName);
-  return withMaintenance(async()=>{await assertPlainAction(project);if(project.hasSelf)await ensureNoGuardedRuns();return streamSteps(project,[composeArgs(project,'up',['-d'])],onData);});
+  return withMaintenance(async () => {
+    await assertPlainAction(project);
+    if (project.hasSelf) await ensureNoGuardedRuns();
+    return streamSteps(project, [composeArgs(project, 'up', ['-d'])], onData);
+  });
 }
 
 // Returned instead of an exit code when the run was handed to the host. There
@@ -194,32 +228,40 @@ export const DETACHED = 'detached';
 // with no image to pull) from aborting the update for everything else.
 export async function update(projectName, onData) {
   const project = await findProject(projectName);
-  const policy=await readPolicy(project);
-  if(policy){
-    const run=(argv,options={})=>runCommand(argv,{...options,cwd:options.cwd??project.workdir,env:registry.env()});
-    const updater=createGuardedUpdater({run,inspect:async(service,p)=>{
-      const ids=(await run(composeArgs(p,'ps',['--all','-q',service]))).stdout.trim().split('\n').filter(Boolean);
-      if(ids.length!==1)throw Error('Guarded services must have exactly one container each');
-      return docker.getContainer(ids[0]).inspect();
-    }});
-    return updater.update(project,policy,onData);
+  const policy = await readPolicy(project);
+  if (policy) {
+    const run = (argv, options = {}) =>
+      runCommand(argv, { ...options, cwd: options.cwd ?? project.workdir, env: registry.env() });
+    const updater = createGuardedUpdater({
+      run,
+      inspect: async (service, p) => {
+        const ids = (await run(composeArgs(p, 'ps', ['--all', '-q', service]))).stdout
+          .trim()
+          .split('\n')
+          .filter(Boolean);
+        if (ids.length !== 1) throw Error('Guarded services must have exactly one container each');
+        return docker.getContainer(ids[0]).inspect();
+      },
+    });
+    return updater.update(project, policy, onData);
   }
-  return withMaintenance(async()=>{
-  await assertIdle(project);
+  return withMaintenance(async () => {
+    await assertIdle(project);
 
-  if (project.hasSelf) {
-    await ensureNoGuardedRuns();
-    onData(`This project runs kissd itself (${SELF_NAME}).\n`);
-    onData('Handing the compose run to the host so it survives this container being replaced.\n');
-    onData('The panel will drop out for a few seconds — reload once it returns.\n');
-    await updateSelfDetached(project);
-    return DETACHED;
-  }
+    if (project.hasSelf) {
+      await ensureNoGuardedRuns();
+      onData(`This project runs kissd itself (${SELF_NAME}).\n`);
+      onData('Handing the compose run to the host so it survives this container being replaced.\n');
+      onData('The panel will drop out for a few seconds — reload once it returns.\n');
+      await updateSelfDetached(project);
+      return DETACHED;
+    }
 
-  return streamSteps(project, [
-    composeArgs(project, 'pull', ['--ignore-buildable']),
-    composeArgs(project, 'up', ['-d']),
-  ], onData);
+    return streamSteps(
+      project,
+      [composeArgs(project, 'pull'), composeArgs(project, 'up', ['-d'])],
+      onData,
+    );
   });
 }
 
@@ -229,19 +271,19 @@ export async function update(projectName, onData) {
 // Save & apply are for.
 export async function restart(projectName, onData) {
   const project = await findProject(projectName);
-  return withMaintenance(async()=>{
-  await assertPlainAction(project);
+  return withMaintenance(async () => {
+    await assertPlainAction(project);
 
-  if (project.hasSelf) {
-    await ensureNoGuardedRuns();
-    onData(`This project runs kissd itself (${SELF_NAME}).\n`);
-    onData('Handing the compose run to the host so it survives kissd restarting.\n');
-    onData('The panel will drop out for a few seconds — reload once it returns.\n');
-    await restartSelfDetached(project);
-    return DETACHED;
-  }
+    if (project.hasSelf) {
+      await ensureNoGuardedRuns();
+      onData(`This project runs kissd itself (${SELF_NAME}).\n`);
+      onData('Handing the compose run to the host so it survives kissd restarting.\n');
+      onData('The panel will drop out for a few seconds — reload once it returns.\n');
+      await restartSelfDetached(project);
+      return DETACHED;
+    }
 
-  return streamSteps(project, [composeArgs(project, 'restart')], onData);
+    return streamSteps(project, [composeArgs(project, 'restart')], onData);
   });
 }
 
@@ -249,10 +291,12 @@ export async function backups(projectName) {
   const dir = path.join(BACKUP_DIR, projectName);
   try {
     const names = await fs.readdir(dir);
-    const out = await Promise.all(names.map(async (n) => {
-      const st = await fs.stat(path.join(dir, n));
-      return { name: n, size: st.size, at: st.mtimeMs };
-    }));
+    const out = await Promise.all(
+      names.map(async (n) => {
+        const st = await fs.stat(path.join(dir, n));
+        return { name: n, size: st.size, at: st.mtimeMs };
+      }),
+    );
     return out.sort((a, b) => b.at - a.at).slice(0, 20);
   } catch {
     return [];
@@ -267,6 +311,12 @@ export async function readBackup(projectName, name) {
 }
 
 // Shared by container actions and maintenance so other controls cannot interrupt a guarded run.
-export async function ensureProjectIdle(projectName){return assertIdle(await findProject(projectName));}
-export async function ensurePlainAction(projectName){return assertPlainAction(await findProject(projectName));}
-export async function ensureNoGuardedRuns(){for(const p of await projects())await assertIdle(p);}
+export async function ensureProjectIdle(projectName) {
+  return assertIdle(await findProject(projectName));
+}
+export async function ensurePlainAction(projectName) {
+  return assertPlainAction(await findProject(projectName));
+}
+export async function ensureNoGuardedRuns() {
+  for (const p of await projects()) await assertIdle(p);
+}
