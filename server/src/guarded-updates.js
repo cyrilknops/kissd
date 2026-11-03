@@ -79,7 +79,7 @@ export function createGuardedUpdater({run=runCommand,inspect,sleep=delay}={}){
    await sleep(policy.intervalMs??1000);
   }throw Error('Health gate failed');
  }
- async function execute(project,policy,emit){
+ async function execute(project,policy,emit,job){
   if(project.hasSelf||project.files.length!==1)throw Error('Guarded updates require one compose file and cannot replace kissd itself');
   const state=await sourceState(project);const source=state[project.files[0]];const fileMode=(await fs.stat(project.files[0])).mode&0o777;
   const cfg=JSON.parse((await run(compose(project,'config',['--format','json']),{cwd:project.workdir})).stdout);
@@ -98,28 +98,29 @@ export function createGuardedUpdater({run=runCommand,inspect,sleep=delay}={}){
   const protectedCheck=async()=>{for(const [s,value]of Object.entries(protectedBefore))if(JSON.stringify(fingerprint(await inspect(s,project)))!==JSON.stringify(value))throw Error('Protected service changed: '+s);};
   await check(policy.preflight,project);await healthy(project,policy);
   const changed=policy.services.filter(s=>old[s].Image!==desired[s].Id);
-  if(!changed.length){emit('Current pinned release is healthy. No services changed.\n');return;}
+  if(!changed.length){await unchanged(project,state);await protectedCheck();emit('Current pinned release is healthy. No services changed.\n');return;}
   let order=policy.services;
   if(policy.order){try{order=JSON.parse((await run(policy.order,{cwd:project.workdir,timeoutMs:10000})).stdout);}catch{throw Error('Deployment order check failed');}}
   if(!Array.isArray(order)||order.length!==policy.services.length||new Set(order).size!==order.length||order.some(s=>!policy.services.includes(s)))throw Error('Invalid deployment order');
-  const dir=path.join(project.workdir,'.kissd',randomUUID());await fs.mkdir(dir,{mode:0o700});
+  const dir=job.dir;
   const prior=oldCompose(source,old);await fs.writeFile(path.join(dir,'rollback-compose.yml'),prior,{mode:0o600});
   for(const [file,value]of Object.entries(state))if(value!==null)await fs.writeFile(path.join(dir,path.basename(file)+'.private'),value,{mode:0o600});
   const dump=path.join(dir,'database.dump');emit('Backing up PostgreSQL…\n');
   const database=(await inspect(policy.database,project)).Id;
   try{await run(['docker','exec',database,'sh','-c','exec pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc'],{outputFile:dump,timeoutMs:120000});await fs.chmod(dump,0o600);if(!(await fs.stat(dump)).size)throw Error();await run(['docker','exec','-i',database,'pg_restore','--list'],{inputFile:dump,timeoutMs:30000});}catch{throw Error('Database backup verification failed; no services changed');}
+  await job.record({status:'backup-verified',order,previousImages:Object.fromEntries(Object.entries(old).map(([s,x])=>[s,x.Config.Image]))});
   emit('Database archive verified. Starting sequential update.\n');
   await unchanged(project,state);await protectedCheck();await check(policy.preflight,project);
   const touched=[];
   try{
    for(const s of order.filter(s=>changed.includes(s))){
-    await unchanged(project,state);touched.push(s);emit('Updating '+s+'…\n');await run(compose(project,'up',['-d','--no-deps','--pull','never',s]),{cwd:project.workdir,timeoutMs:180000});
-    await healthy(project,policy,s);const x=await inspect(s,project);if(x.Image!==desired[s].Id)throw Error('Image verification failed');await protectedCheck();
+    await unchanged(project,state);touched.push(s);await job.record({status:'updating',service:s,touched:[...touched]});emit('Updating '+s+'…\n');await run(compose(project,'up',['-d','--no-deps','--pull','never',s]),{cwd:project.workdir,timeoutMs:180000});
+    await healthy(project,policy,s);const x=await inspect(s,project);if(x.Image!==desired[s].Id||x.RestartCount!==0)throw Error('Image or restart verification failed');await protectedCheck();
    }
    await unchanged(project,state);await protectedCheck();emit('Guarded update passed all health checks.\n');
   }catch(error){
    if(!touched.length)throw error;
-   emit('Update failed. Rolling application images back…\n');
+   await job.record({status:'rolling-back',touched:[...touched]});emit('Update failed. Rolling application images back…\n');
    try{
     await unchanged(project,state);await atomic(project.files[0],prior,fileMode);const rollbackState={...state,[project.files[0]]:prior};
     for(const s of [...touched].reverse()){
@@ -128,7 +129,7 @@ export function createGuardedUpdater({run=runCommand,inspect,sleep=delay}={}){
     }
     await protectedCheck();emit('Previous application images restored. PostgreSQL data was not restored.\n');
    }catch{const e=Error('Automatic rollback could not complete. Manual recovery required; inspect '+dir);e.recoveryRequired=true;throw e;}
-   throw Error('Update failed and was rolled back');
+   const e=Error('Update failed and was rolled back');e.rolledBack=true;throw e;
   }
  }
  return {async update(project,policy,onData){
@@ -136,9 +137,11 @@ export function createGuardedUpdater({run=runCommand,inspect,sleep=delay}={}){
   await assertIdle(project);const root=path.join(project.workdir,'.kissd');await privateDir(root);
   const lock=path.join(root,'update.lock');const id=randomUUID();let handle;
   try{handle=await fs.open(lock,'wx',0o600);await handle.writeFile(JSON.stringify({id,startedAt:new Date().toISOString()}));}catch(e){if(e.code==='EEXIST')throw Error('A guarded update already owns this project');throw e;}finally{await handle?.close();}
-  const job={lines:[],listeners:new Set([onData])};const emit=line=>{job.lines.push(line);for(const listener of job.listeners)try{listener(line);}catch{}};
+  const dir=path.join(root,id);await fs.mkdir(dir,{mode:0o700});
+  const journal={id,project:project.project,revision:policy.approvedRevision,status:'preflight',startedAt:new Date().toISOString(),touched:[]};
+  const job={dir,lines:[],listeners:new Set([onData]),record:async patch=>{Object.assign(journal,patch);await atomic(path.join(dir,'status.json'),JSON.stringify(journal,null,2));}};await job.record({});const emit=line=>{job.lines.push(line);for(const listener of job.listeners)try{listener(line);}catch{}};
   active.set(project.workdir,job);let keepLock=false;
-  job.promise=(async()=>{try{await execute(project,policy,emit);return 0;}catch(e){keepLock=e.recoveryRequired===true;throw e;}finally{active.delete(project.workdir);if(!keepLock)await fs.rm(lock,{force:true});}})();
+  job.promise=(async()=>{try{await execute(project,policy,emit,job);await job.record({status:'succeeded',completedAt:new Date().toISOString()});return 0;}catch(e){keepLock=e.recoveryRequired===true;await job.record({status:keepLock?'recovery-required':e.rolledBack?'rolled-back':'failed',completedAt:new Date().toISOString()});throw e;}finally{active.delete(project.workdir);if(!keepLock){const own=JSON.parse(await fs.readFile(lock,'utf8'));if(own.id===id)await fs.rm(lock);}}})();
   return job.promise;
  }};
 }
