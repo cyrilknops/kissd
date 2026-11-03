@@ -38,6 +38,7 @@ async function fixture(t, options = {}) {
     attempts: 2,
     intervalMs: 1,
   };
+  if (options.latest) policy.imageTags = Object.fromEntries(services.map(s => [s, config.services[s].image.split('@')[0]+':latest']));
   const containers = Object.fromEntries(
     ['db', ...services].map((n) => [
       n,
@@ -76,13 +77,17 @@ async function fixture(t, options = {}) {
       return {
         stdout: JSON.stringify([
           {
-            Id: 'sha256:' + argv[3].split(':').at(-1),
+            Id: 'sha256:' + (argv[3].endsWith(':latest') ? (argv[3].includes('/web') ? 'd' : 'c').repeat(64) : argv[3].split(':').at(-1)),
+            RepoDigests: [ref(argv[3].includes('/web') ? 'd' : 'c')],
             Config: { Labels: { 'org.opencontainers.image.revision': options.revision ?? rev } },
           },
         ]),
       };
     }
-    if (argv[1] === 'pull') throw Error('pull failed: fixture-private-detail');
+    if (argv[1] === 'pull') {
+      if (options.latest && !options.pullFail) return {stdout:''};
+      throw Error('pull failed: fixture-private-detail');
+    }
     if (argv.includes('config'))
       return { stdout: JSON.stringify(JSON.parse(await fs.readFile(file, 'utf8'))) };
     if (argv.some((a) => a.includes('pg_dump'))) {
@@ -138,6 +143,22 @@ async function fixture(t, options = {}) {
     healthFailures: () => healthFailures,
   };
 }
+test('latest tracking accepts a new release without changing the policy and keeps rollback pins', async t => {
+  const f=await fixture(t,{latest:true});
+  f.policy.approvedRevision='f'.repeat(40);
+  f.policy.approvedImages={'api-a':ref('a'),'api-b':ref('a'),web:ref('b')};
+  for (const name of f.policy.services) f.config.services[name].image=f.policy.approvedImages[name];
+  await fs.writeFile(f.file,JSON.stringify(f.config));
+  const policyBefore=JSON.stringify(f.policy);
+  await f.updater.update(f.project,f.policy,()=>{});
+  const actual=JSON.parse(await fs.readFile(f.file,'utf8'));
+  assert.equal(actual.services['api-a'].image,ref('c'));
+  assert.equal(actual.services.web.image,ref('d'));
+  assert.equal(JSON.stringify(f.policy),policyBefore);
+  assert.equal(f.containers.db.State.StartedAt,'before');
+  const pulls=f.calls.filter(a=>a[1]==='pull');
+  assert.equal(pulls.length,2);
+});
 test('guarded update backs up before sequential replacements, excludes DB and preserves configuration', async (t) => {
   const f = await fixture(t);
   const messages = [];
