@@ -1,6 +1,7 @@
 // Host metrics. The container runs with pid:host, so /proc is the host's
 // procfs and reports host-wide CPU/memory/load directly.
 import fs from 'node:fs/promises';
+import { createCpuSampler } from './host-cpu.js';
 
 const HOST_ROOT = '/host/root';
 
@@ -12,22 +13,26 @@ async function readText(path) {
   return fs.readFile(path, 'utf8');
 }
 
-let lastCpu = null;
+const sampleCpu = createCpuSampler();
+let cpuSample = null;
+let cpuSampleAt = 0;
+let cpuPending = null;
+
+async function cpuUsage() {
+  // Overview, alerts and history share a sample instead of consuming each
+  // other's baselines within the same scheduler tick.
+  if (cpuSample && Date.now() - cpuSampleAt < 1000) return cpuSample;
+  if (cpuPending) return cpuPending;
+  cpuPending = readText('/proc/stat').then((text) => {
+    cpuSample = sampleCpu(text);
+    cpuSampleAt = Date.now();
+    return cpuSample;
+  }).finally(() => { cpuPending = null; });
+  return cpuPending;
+}
 
 export async function cpu() {
-  const line = (await readText('/proc/stat')).split('\n')[0];
-  const parts = line.trim().split(/\s+/).slice(1).map(Number);
-  const idle = parts[3] + (parts[4] || 0);
-  const total = parts.reduce((a, b) => a + b, 0);
-
-  const prev = lastCpu;
-  lastCpu = { idle, total };
-  if (!prev) return 0;
-
-  const dTotal = total - prev.total;
-  const dIdle = idle - prev.idle;
-  if (dTotal <= 0) return 0;
-  return Math.max(0, Math.min(100, ((dTotal - dIdle) / dTotal) * 100));
+  return (await cpuUsage()).total;
 }
 
 export async function memory() {
@@ -156,7 +161,7 @@ try {
 
 export async function snapshot() {
   const [c, m, l, u, n, d] = await Promise.all([
-    cpu(), memory(), load(), uptime(), network(), disks(),
+    cpuUsage(), memory(), load(), uptime(), network(), disks(),
   ]);
-  return { cpu: c, cores: cpuCount, memory: m, load: l, uptime: u, network: n, disks: d, at: Date.now() };
+  return { cpu: c.total, cpuPerCore: c.perCore, cores: cpuCount, memory: m, load: l, uptime: u, network: n, disks: d, at: Date.now() };
 }

@@ -132,6 +132,10 @@ a { color: var(--accent); }
 .stat-value { font-size: 27px; font-weight: 640; line-height: 1.1; }
 .stat-sub { color: var(--muted); font-size: 12px; margin-top: 5px; }
 
+.cpu-cores { margin-top: 16px; }
+.cpu-core-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr)); gap: 14px 24px; }
+.cpu-core-label { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; font-variant-numeric: tabular-nums; }
+
 /* Historical metrics share a time axis and downtime overlays. */
 .history-panel { margin-top: 20px; }
 .metrics-toolbar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }

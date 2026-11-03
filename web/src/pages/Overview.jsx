@@ -86,6 +86,28 @@ export default function Overview({ containers }) {
         />
       </div>
 
+      {snap.cpuPerCore?.length > 0 && (
+        <div className="card cpu-cores">
+          <h3>CPU usage per core</h3>
+          <p className="dim metrics-caption">Logical CPUs · live usage · updates every 3 seconds</p>
+          <div className="cpu-core-grid">
+            {snap.cpuPerCore.map(({ id, percent }) => (
+              <div key={id}>
+                <div className="cpu-core-label">
+                  <span>CPU {id}</span>
+                  <span className="dim">{percent == null ? '—' : `${percent.toFixed(1)}%`}</span>
+                </div>
+                <div className="bar" role="progressbar" aria-label={`CPU ${id} usage`}
+                  aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent ?? undefined}
+                  aria-valuetext={percent == null ? 'Waiting for CPU sample' : `${percent.toFixed(1)}%`}>
+                  <i className={severity(percent)} style={{ width: `${percent ?? 0}%` }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <HistoryPanel compact />
 
       <div className="card" style={{ marginTop: 16 }}>
