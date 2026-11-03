@@ -62,7 +62,7 @@ about how your host is arranged, and gets out of the way.
 | 🔍 **Detail page** | Per-container stats, mounts, networks, published ports, restart policy, failing healthcheck output, and live logs |
 | 📈 **Metrics history** | Background collection, persistent host/container graphs, 1h–7d timeframes, downtime and health timelines, peaks and restart events |
 | 🎛️ **Actions** | Start, stop, restart, and update via `docker compose pull && up -d`, resolved from each container's own compose labels — one service, or a whole project at once from its group header. **Restart all** bounces a whole project with `docker compose restart` |
-| 📈 **Host metrics** | CPU, load, memory, swap, network throughput, per-mount disk usage |
+| 📈 **Host metrics** | Total and per-core CPU usage, load, memory, swap, network throughput, per-mount disk usage |
 | 🔔 **Alerts** | ntfy push when a container stops, goes unhealthy, or enters a restart loop — plus disk, memory and load thresholds. Muted automatically for whatever is mid-update |
 | 🔑 **Registries** | Private registry logins in Settings, applied to every `docker` the panel runs — no `docker login` on the host |
 | 📝 **Compose** | View and edit the compose file behind any project, with validation, automatic backups and one-click apply |
@@ -209,6 +209,11 @@ thresholds, cooldown, hysteresis, update muting — lives in **Settings** and is
 you type a new one.
 
 ### 📈 Metrics history
+
+Overview shows live usage for each **logical CPU** (including SMT/hyperthreads),
+identified by its Linux CPU number, with a percentage and usage bar refreshed
+every **3 seconds**. A new CPU shows a dash until two samples are available.
+The CPU card and historical charts continue to show aggregate host usage.
 
 **Metrics** shows the host or a container over **1h, 3h, 1d, 3d, or 7d** (7d by
 default). CPU, memory, network traffic, host load/disk/swap, container disk I/O
