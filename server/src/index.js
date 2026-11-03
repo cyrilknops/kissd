@@ -17,6 +17,8 @@ import * as registry from './registry.js';
 import * as mute from './mute.js';
 import * as metrics from './metrics.js';
 import { registerMetricsRoutes } from './metrics-routes.js';
+import { registerDeploymentGuards } from './deployment-guards.js';
+import { policySummary, withMaintenance } from './guarded-updates.js';
 import { send as ntfySend } from './ntfy.js';
 import { handleTerminal, handleLogs } from './terminal.js';
 
@@ -97,6 +99,16 @@ function muteWhile(keys, scope, reason) {
   return mute.begin(keys);
 }
 
+registerDeploymentGuards(app, {
+  requireAuth: auth.requireAuth,
+  inspect: dockerApi.inspect,
+  composeInfo: dockerApi.composeInfo,
+  selfName: dockerApi.SELF_NAME,
+  ensurePlain: compose.ensurePlainAction,
+  ensureIdle: compose.ensureProjectIdle,
+  ensureNoRuns: compose.ensureNoGuardedRuns,
+});
+
 // --- containers ------------------------------------------------------------
 
 app.get('/api/containers', auth.requireAuth, async (req, res) => {
@@ -105,7 +117,33 @@ app.get('/api/containers', auth.requireAuth, async (req, res) => {
     const running = containers.filter((c) => c.state === 'running').map((c) => c.id);
     // Cached and non-blocking: the list must not wait on stats sampling.
     const stats = dockerApi.stats(running);
-    res.json(containers.map((c) => ({ ...c, stats: stats[c.id] || null })));
+    const policies = new Map();
+    await Promise.all(
+      containers
+        .filter((c) => c.compose)
+        .map(async (c) => {
+          if (!policies.has(c.compose.project))
+            policies.set(
+              c.compose.project,
+              policySummary({
+                ...c.compose,
+                services: containers
+                  .filter((x) => x.compose?.project === c.compose.project)
+                  .map((x) => x.compose.service),
+              }),
+            );
+        }),
+    );
+    const values = new Map(
+      await Promise.all([...policies].map(async ([key, value]) => [key, await value])),
+    );
+    res.json(
+      containers.map((c) => ({
+        ...c,
+        stats: stats[c.id] || null,
+        compose: c.compose ? { ...c.compose, updatePolicy: values.get(c.compose.project) } : null,
+      })),
+    );
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -115,10 +153,19 @@ app.get('/api/containers/:id', auth.requireAuth, async (req, res) => {
   try {
     const info = await dockerApi.detail(req.params.id);
     const stats = info.running ? await dockerApi.statsOne(info.id) : null;
-    return res.json({ ...info, stats });
+    const project = info.compose
+      ? (await compose.projects()).find((p) => p.project === info.compose.project)
+      : null;
+    return res.json({
+      ...info,
+      stats,
+      compose: info.compose ? { ...info.compose, updatePolicy: project?.updatePolicy } : null,
+    });
   } catch (err) {
     const missing = err.statusCode === 404;
-    return res.status(missing ? 404 : 500).json({ error: missing ? 'No such container' : err.message });
+    return res
+      .status(missing ? 404 : 500)
+      .json({ error: missing ? 'No such container' : err.message });
   }
 });
 
@@ -134,7 +181,8 @@ app.post('/api/containers/:id/update', auth.requireAuth, async (req, res) => {
 
     if (!compose) {
       return res.status(400).json({
-        error: 'Not compose-managed — this container has no compose labels, so it cannot be updated automatically.',
+        error:
+          'Not compose-managed — this container has no compose labels, so it cannot be updated automatically.',
       });
     }
 
@@ -147,16 +195,20 @@ app.post('/api/containers/:id/update', auth.requireAuth, async (req, res) => {
     try {
       if (name === dockerApi.SELF_NAME) {
         res.write('Updating kissd itself.\n');
-        res.write('Handing the compose run to the host so it survives this container being replaced.\n');
+        res.write(
+          'Handing the compose run to the host so it survives this container being replaced.\n',
+        );
         res.write('The panel will drop out for a few seconds — reload once it returns.\n');
-        await dockerApi.updateSelfDetached(compose);
+        await withMaintenance(() => dockerApi.updateSelfDetached(compose));
         // Nothing here ever sees a detached run finish — and this process is
         // about to be replaced — so the mute gets a fixed window on disk.
         mute.muteFor(keys, mute.DETACHED_SECONDS);
         return res.end();
       }
 
-      const code = await dockerApi.update(compose, (chunk) => res.write(chunk));
+      const code = await withMaintenance(() =>
+        dockerApi.update(compose, (chunk) => res.write(chunk)),
+      );
       res.write(code === 0 ? '\nUpdate complete.\n' : `\nUpdate failed (exit ${code}).\n`);
       return res.end();
     } finally {
@@ -177,7 +229,7 @@ app.post('/api/containers/:id/:action', auth.requireAuth, async (req, res) => {
     return res.status(400).json({ error: `Unsupported action: ${action}` });
   }
   try {
-    await dockerApi.action(id, action);
+    await withMaintenance(() => dockerApi.action(id, action));
     return res.json({ ok: true });
   } catch (err) {
     return res.status(500).json({ error: err.message });
@@ -199,7 +251,7 @@ app.post('/api/system/prune/:target', auth.requireAuth, async (req, res) => {
     return res.status(400).json({ error: 'Unknown prune target' });
   }
   try {
-    return res.json(await system.prune(req.params.target));
+    return res.json(await withMaintenance(() => system.prune(req.params.target)));
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }
@@ -213,7 +265,7 @@ app.post('/api/system/volumes/remove', auth.requireElevated, async (req, res) =>
     return res.status(400).json({ error: 'A volume name is required' });
   }
   try {
-    return res.json(await system.removeVolume(name));
+    return res.json(await withMaintenance(() => system.removeVolume(name)));
   } catch (err) {
     return res.status(400).json({ error: err.message });
   }
@@ -314,7 +366,10 @@ app.get('/api/compose/backups', auth.requireAuth, async (req, res) => {
 
 app.get('/api/compose/backup', auth.requireAuth, async (req, res) => {
   try {
-    const content = await compose.readBackup(String(req.query.project || ''), String(req.query.name || ''));
+    const content = await compose.readBackup(
+      String(req.query.project || ''),
+      String(req.query.name || ''),
+    );
     res.json({ content });
   } catch (err) {
     res.status(404).json({ error: 'Backup not found' });
@@ -364,8 +419,11 @@ app.put('/api/settings', auth.requireAuth, (req, res) => {
     // Registry logins only take effect once they are on disk where the docker
     // CLI will look for them, so the config is rewritten with every save.
     registry.write(updated);
-    try { metrics.prune(); }
-    catch (err) { console.error(`metrics cleanup failed: ${err.message}`); }
+    try {
+      metrics.prune();
+    } catch (err) {
+      console.error(`metrics cleanup failed: ${err.message}`);
+    }
     res.json(settingsStore.redact(updated));
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -394,12 +452,15 @@ app.post('/api/settings/ntfy/test', auth.requireAuth, async (req, res) => {
     ...Object.fromEntries(Object.entries(draft).filter(([, v]) => v !== '' && v !== undefined)),
   };
   try {
-    await ntfySend({ ntfy }, {
-      title: 'Test notification',
-      message: 'If you can read this, kissd can reach your ntfy server.',
-      priority: 'default',
-      tags: ['wave'],
-    });
+    await ntfySend(
+      { ntfy },
+      {
+        title: 'Test notification',
+        message: 'If you can read this, kissd can reach your ntfy server.',
+        priority: 'default',
+        tags: ['wave'],
+      },
+    );
     res.json({ ok: true });
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -420,15 +481,17 @@ const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 const ASSET_DIR = `${path.sep}assets${path.sep}`;
 const NEVER_CACHE = new Set(['index.html', 'sw.js', 'manifest.webmanifest']);
 
-app.use(express.static(PUBLIC_DIR, {
-  setHeaders(res, filePath) {
-    if (NEVER_CACHE.has(path.basename(filePath))) {
-      res.setHeader('Cache-Control', 'no-cache');
-    } else if (filePath.includes(ASSET_DIR)) {
-      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
-    }
-  },
-}));
+app.use(
+  express.static(PUBLIC_DIR, {
+    setHeaders(res, filePath) {
+      if (NEVER_CACHE.has(path.basename(filePath))) {
+        res.setHeader('Cache-Control', 'no-cache');
+      } else if (filePath.includes(ASSET_DIR)) {
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      }
+    },
+  }),
+);
 
 app.get('*', (req, res) => {
   if (req.path.startsWith('/api/')) return res.status(404).json({ error: 'Not found' });
@@ -477,15 +540,21 @@ server.listen(PORT, () => {
     console.error(`could not write the docker config: ${err.message}`);
   }
   // Sample stats once up front so the first page load already has numbers.
-  try { metrics.start(); }
-  catch (err) { console.error(`could not start metrics collection: ${err.message}`); }
+  try {
+    metrics.start();
+  } catch (err) {
+    console.error(`could not start metrics collection: ${err.message}`);
+  }
   alerts.start();
 });
 
 for (const sig of ['SIGTERM', 'SIGINT']) {
   process.on(sig, () => {
     alerts.stop();
-    server.close(async () => { await metrics.stop().catch(() => {}); process.exit(0); });
+    server.close(async () => {
+      await metrics.stop().catch(() => {});
+      process.exit(0);
+    });
     setTimeout(() => process.exit(0), 5000).unref();
   });
 }

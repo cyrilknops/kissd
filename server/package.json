@@ -4,11 +4,13 @@
   "private": true,
   "type": "module",
   "main": "src/index.js",
-  "engines": { "node": ">=22.13.0" },
+  "engines": {
+    "node": ">=22.13.0"
+  },
   "scripts": {
     "start": "node src/index.js",
     "test": "node --test test/*.test.js",
-    "test:coverage": "node --test --experimental-test-coverage --test-coverage-include='src/metrics-*.js' --test-coverage-lines=80 --test-coverage-branches=80 --test-coverage-functions=80 test/*.test.js"
+    "test:coverage": "node --test --experimental-test-coverage --test-coverage-include='src/metrics-*.js' --test-coverage-include='src/guarded-updates.js' --test-coverage-include='src/deployment-guards.js' --test-coverage-include='src/loadout-policy.js' --test-coverage-lines=80 --test-coverage-branches=80 --test-coverage-functions=80 test/*.test.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
@@ -18,6 +20,7 @@
     "express": "^4.19.2",
     "jsonwebtoken": "^9.0.2",
     "node-pty": "^1.0.0",
-    "ws": "^8.17.0"
+    "ws": "^8.17.0",
+    "yaml": "^2.9.1"
   }
 }

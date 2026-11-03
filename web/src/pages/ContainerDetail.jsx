@@ -72,9 +72,15 @@ export default function ContainerDetail({ onOpenShell }) {
   if (error && !c) {
     return (
       <>
-        <div className="page-head"><div><h1>Container</h1></div></div>
+        <div className="page-head">
+          <div>
+            <h1>Container</h1>
+          </div>
+        </div>
         <div className="notice err">{error}</div>
-        <Link className="btn" to="/containers">← Back to containers</Link>
+        <Link className="btn" to="/containers">
+          ← Back to containers
+        </Link>
       </>
     );
   }
@@ -87,14 +93,20 @@ export default function ContainerDetail({ onOpenShell }) {
     <>
       <div className="page-head">
         <div>
-          <Link to="/containers" className="dim" style={{ fontSize: 13, textDecoration: 'none' }}>← Containers</Link>
+          <Link to="/containers" className="dim" style={{ fontSize: 13, textDecoration: 'none' }}>
+            ← Containers
+          </Link>
           <h1 style={{ marginTop: 4 }}>
             {c.name}{' '}
             <span className={`pill ${c.state}`} style={{ verticalAlign: 'middle', fontSize: 12 }}>
-              <span className="dot" />{c.state}
+              <span className="dot" />
+              {c.state}
             </span>
             {c.health && (
-              <span className={`pill ${c.health}`} style={{ verticalAlign: 'middle', fontSize: 12, marginLeft: 6 }}>
+              <span
+                className={`pill ${c.health}`}
+                style={{ verticalAlign: 'middle', fontSize: 12, marginLeft: 6 }}
+              >
                 {c.health}
               </span>
             )}
@@ -116,8 +128,14 @@ export default function ContainerDetail({ onOpenShell }) {
               {busy === 'start' ? '…' : 'Start'}
             </button>
           )}
-          <button className="btn sm" disabled={!c.running}
-                  onClick={() => { onOpenShell({ id: c.id, name: c.name }); navigate('/terminal'); }}>
+          <button
+            className="btn sm"
+            disabled={!c.running}
+            onClick={() => {
+              onOpenShell({ id: c.id, name: c.name });
+              navigate('/terminal');
+            }}
+          >
             Shell
           </button>
           <button
@@ -128,9 +146,18 @@ export default function ContainerDetail({ onOpenShell }) {
           >
             Compose file
           </button>
-          <button className="btn sm primary" disabled={busy || !c.compose}
-                  title={c.compose ? 'docker compose pull && up -d' : 'Not compose-managed'}
-                  onClick={runUpdate}>
+          <button
+            className="btn sm primary"
+            disabled={busy || !c.compose || Boolean(c.compose?.updatePolicy)}
+            title={
+              c.compose?.updatePolicy
+                ? 'Use Guarded update on the project'
+                : c.compose
+                  ? 'docker compose pull && up -d'
+                  : 'Not compose-managed'
+            }
+            onClick={runUpdate}
+          >
             {busy === 'update' ? 'Updating…' : 'Update'}
           </button>
         </div>
@@ -139,15 +166,17 @@ export default function ContainerDetail({ onOpenShell }) {
       {error && <div className="notice err">{error}</div>}
       {c.isSelf && (
         <div className="notice warn">
-          This is kissd itself. Updating it hands the compose run to the host and
-          detaches, so the panel will briefly drop out — reload once it returns.
+          This is kissd itself. Updating it hands the compose run to the host and detaches, so the
+          panel will briefly drop out — reload once it returns.
         </div>
       )}
 
       <div className="grid cols-4">
         <div className="card">
           <h3>CPU</h3>
-          <div className="stat-value">{c.stats?.cpu != null ? `${c.stats.cpu.toFixed(1)}%` : '—'}</div>
+          <div className="stat-value">
+            {c.stats?.cpu != null ? `${c.stats.cpu.toFixed(1)}%` : '—'}
+          </div>
           <ContainerCpuInfo stats={c.stats} cpuSet={c.cpuSet} running={c.running} />
         </div>
         <div className="card">
@@ -155,8 +184,15 @@ export default function ContainerDetail({ onOpenShell }) {
           <div className="stat-value">{c.stats ? bytes(c.stats.memory) : '—'}</div>
           {c.stats?.memoryLimit > 0 && (
             <>
-              <div className="stat-sub">{memPct.toFixed(1)}% of {bytes(c.stats.memoryLimit)}</div>
-              <div className="bar"><i className={memPct >= 90 ? 'crit' : memPct >= 75 ? 'warn' : ''} style={{ width: `${Math.min(100, memPct)}%` }} /></div>
+              <div className="stat-sub">
+                {memPct.toFixed(1)}% of {bytes(c.stats.memoryLimit)}
+              </div>
+              <div className="bar">
+                <i
+                  className={memPct >= 90 ? 'crit' : memPct >= 75 ? 'warn' : ''}
+                  style={{ width: `${Math.min(100, memPct)}%` }}
+                />
+              </div>
             </>
           )}
         </div>
@@ -179,7 +215,9 @@ export default function ContainerDetail({ onOpenShell }) {
       {updateLog !== null && (
         <div className="card" style={{ marginTop: 16 }}>
           <h3>Update output</h3>
-          <pre className="stream" ref={updateRef} style={{ maxHeight: '32vh' }}>{updateLog || 'Starting…'}</pre>
+          <pre className="stream" ref={updateRef} style={{ maxHeight: '32vh' }}>
+            {updateLog || 'Starting…'}
+          </pre>
         </div>
       )}
 
@@ -189,7 +227,8 @@ export default function ContainerDetail({ onOpenShell }) {
           {c.healthLog.map((l, i) => (
             <pre key={i} className="stream" style={{ maxHeight: 140, marginBottom: 8 }}>
               exit {l.exitCode} · {new Date(l.start).toLocaleString()}
-              {'\n'}{l.output || '(no output)'}
+              {'\n'}
+              {l.output || '(no output)'}
             </pre>
           ))}
         </div>
@@ -198,18 +237,28 @@ export default function ContainerDetail({ onOpenShell }) {
       <div className="grid cols-2" style={{ marginTop: 16 }}>
         <div className="card">
           <h3>Details</h3>
-          <Row label="Container ID" mono>{c.id.slice(0, 12)}</Row>
-          <Row label="Image ID" mono>{(c.imageId || '').replace('sha256:', '').slice(0, 12)}</Row>
-          <Row label="Command" mono>{c.command}</Row>
+          <Row label="Container ID" mono>
+            {c.id.slice(0, 12)}
+          </Row>
+          <Row label="Image ID" mono>
+            {(c.imageId || '').replace('sha256:', '').slice(0, 12)}
+          </Row>
+          <Row label="Command" mono>
+            {c.command}
+          </Row>
           <Row label="Created">{new Date(c.created).toLocaleString()}</Row>
           {!c.running && c.finishedAt && Number(new Date(c.finishedAt)) > 0 && (
-            <Row label="Exited">{new Date(c.finishedAt).toLocaleString()} (code {c.exitCode})</Row>
+            <Row label="Exited">
+              {new Date(c.finishedAt).toLocaleString()} (code {c.exitCode})
+            </Row>
           )}
           {c.compose && (
             <>
               <Row label="Compose project">{c.compose.project}</Row>
               <Row label="Service">{c.compose.service}</Row>
-              <Row label="Working dir" mono>{c.compose.workdir}</Row>
+              <Row label="Working dir" mono>
+                {c.compose.workdir}
+              </Row>
             </>
           )}
         </div>
@@ -217,11 +266,15 @@ export default function ContainerDetail({ onOpenShell }) {
         <div className="card">
           <h3>Networking</h3>
           {c.networks.map((n) => (
-            <Row key={n.name} label={n.name} mono>{n.ip || '—'}</Row>
+            <Row key={n.name} label={n.name} mono>
+              {n.ip || '—'}
+            </Row>
           ))}
           {c.ports.length > 0 ? (
             <div style={{ marginTop: 10 }}>
-              <div className="kv-k" style={{ marginBottom: 6 }}>Ports</div>
+              <div className="kv-k" style={{ marginBottom: 6 }}>
+                Ports
+              </div>
               {c.ports.map((p, i) => (
                 <div key={i} className="mono" style={{ fontSize: 12 }}>
                   {p.published ? `${p.published} → ${p.internal}` : `${p.internal} (not published)`}
@@ -229,7 +282,9 @@ export default function ContainerDetail({ onOpenShell }) {
               ))}
             </div>
           ) : (
-            <p className="dim" style={{ fontSize: 12, marginBottom: 0 }}>No published ports.</p>
+            <p className="dim" style={{ fontSize: 12, marginBottom: 0 }}>
+              No published ports.
+            </p>
           )}
         </div>
       </div>
@@ -240,13 +295,21 @@ export default function ContainerDetail({ onOpenShell }) {
           <div className="table-wrap" style={{ border: 0 }}>
             <table style={{ minWidth: 0 }}>
               <thead>
-                <tr><th>Type</th><th>Source</th><th>Destination</th><th>Mode</th></tr>
+                <tr>
+                  <th>Type</th>
+                  <th>Source</th>
+                  <th>Destination</th>
+                  <th>Mode</th>
+                </tr>
               </thead>
               <tbody>
                 {c.mounts.map((m, i) => (
                   <tr key={i}>
                     <td className="dim">{m.type}</td>
-                    <td className="mono" style={{ maxWidth: 380, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    <td
+                      className="mono"
+                      style={{ maxWidth: 380, overflow: 'hidden', textOverflow: 'ellipsis' }}
+                    >
                       {m.name || m.source}
                     </td>
                     <td className="mono">{m.destination}</td>

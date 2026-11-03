@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { api, bytes, ago } from '../api';
 import StreamModal from '../components/StreamModal';
 import ConfirmRestart from '../components/ConfirmRestart';
+import ProjectUpdateControls from '../components/ProjectUpdateControls';
 import ContainerCpuInfo from '../components/ContainerCpuInfo';
 
 const UNGROUPED = '\u0000ungrouped'; // sorts last; never collides with a project name
@@ -30,11 +31,18 @@ function ContainerCard({ c, busy, onAction }) {
   return (
     <div className="ctr-card">
       <div className="ctr-head">
-        <Link to={`/containers/${c.name}`} className="ctr-name" title={c.name}>{c.name}</Link>
-        <span className={`pill ${c.state}`}><span className="dot" />{c.state}</span>
+        <Link to={`/containers/${c.name}`} className="ctr-name" title={c.name}>
+          {c.name}
+        </Link>
+        <span className={`pill ${c.state}`}>
+          <span className="dot" />
+          {c.state}
+        </span>
       </div>
 
-      <div className="ctr-image mono" title={c.image}>{c.image}</div>
+      <div className="ctr-image mono" title={c.image}>
+        {c.image}
+      </div>
 
       <div className="ctr-meta">
         <div>
@@ -51,15 +59,26 @@ function ContainerCard({ c, busy, onAction }) {
         </div>
         <div>
           <span className="dim">Health</span>
-          <strong className={c.health === 'unhealthy' ? 'bad' : undefined}>{c.health || '—'}</strong>
+          <strong className={c.health === 'unhealthy' ? 'bad' : undefined}>
+            {c.health || '—'}
+          </strong>
         </div>
       </div>
 
-      {c.stats && <div className="bar"><i className={pct >= 90 ? 'crit' : pct >= 75 ? 'warn' : ''} style={{ width: `${pct}%` }} /></div>}
+      {c.stats && (
+        <div className="bar">
+          <i
+            className={pct >= 90 ? 'crit' : pct >= 75 ? 'warn' : ''}
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+      )}
       {c.state === 'running' && c.stats && <ContainerCpuInfo stats={c.stats} />}
 
       {c.ports.length > 0 && (
-        <div className="ctr-ports mono dim" title={c.ports.join(', ')}>{c.ports.join('  ')}</div>
+        <div className="ctr-ports mono dim" title={c.ports.join(', ')}>
+          {c.ports.join('  ')}
+        </div>
       )}
 
       <div className="ctr-actions">
@@ -77,8 +96,11 @@ function ContainerCard({ c, busy, onAction }) {
             {busy === 'start' ? '…' : 'Start'}
           </button>
         )}
-        <button className="btn xs primary" style={{ marginLeft: 'auto' }}
-                onClick={() => navigate(`/containers/${c.name}`)}>
+        <button
+          className="btn xs primary"
+          style={{ marginLeft: 'auto' }}
+          onClick={() => navigate(`/containers/${c.name}`)}
+        >
           Details →
         </button>
       </div>
@@ -89,13 +111,21 @@ function ContainerCard({ c, busy, onAction }) {
 function SkeletonCard() {
   return (
     <div className="ctr-card skeleton" aria-hidden="true">
-      <div className="ctr-head"><span className="sk sk-name" /><span className="sk sk-pill" /></div>
+      <div className="ctr-head">
+        <span className="sk sk-name" />
+        <span className="sk sk-pill" />
+      </div>
       <span className="sk sk-line" />
       <div className="ctr-meta">
-        <span className="sk sk-line short" /><span className="sk sk-line short" />
-        <span className="sk sk-line short" /><span className="sk sk-line short" />
+        <span className="sk sk-line short" />
+        <span className="sk sk-line short" />
+        <span className="sk sk-line short" />
+        <span className="sk sk-line short" />
       </div>
-      <div className="ctr-actions"><span className="sk sk-btn" /><span className="sk sk-btn" /></div>
+      <div className="ctr-actions">
+        <span className="sk sk-btn" />
+        <span className="sk sk-btn" />
+      </div>
     </div>
   );
 }
@@ -117,7 +147,9 @@ function GroupHeader({ name, items, collapsed, onToggle, onUpdate, onRestart }) 
           {running}/{items.length} running
         </span>
         {unhealthy > 0 && (
-          <span className="pill unhealthy" style={{ fontSize: 11 }}>{unhealthy} unhealthy</span>
+          <span className="pill unhealthy" style={{ fontSize: 11 }}>
+            {unhealthy} unhealthy
+          </span>
         )}
         <span className="group-stats dim">
           {cpu > 0 && <>{cpu.toFixed(1)}% CPU</>}
@@ -126,20 +158,12 @@ function GroupHeader({ name, items, collapsed, onToggle, onUpdate, onRestart }) 
       </button>
       {isProject && (
         <div className="btn-row" style={{ gap: 6 }}>
-          <button
-            className="btn xs"
-            title={`Pull and recreate every service in ${name}`}
-            onClick={onUpdate}
-          >
-            Update all
-          </button>
-          <button
-            className="btn xs"
-            title={`Stop and start every container in ${name}, without pulling or recreating`}
-            onClick={onRestart}
-          >
-            Restart all
-          </button>
+          <ProjectUpdateControls
+            project={name}
+            policy={items[0]?.compose?.updatePolicy}
+            onUpdate={onUpdate}
+            onRestart={onRestart}
+          />
         </div>
       )}
     </div>
@@ -151,7 +175,7 @@ export default function Containers({ containers, reload, loaded }) {
   const [error, setError] = useState('');
   const [filter, setFilter] = useState('');
   const [updating, setUpdating] = useState(null);
-  const [restarting, setRestarting] = useState(null);      // project awaiting confirmation
+  const [restarting, setRestarting] = useState(null); // project awaiting confirmation
   const [restartingRun, setRestartingRun] = useState(null);
   const [grouped, setGrouped] = useState(() => loadJson(GROUPING_KEY, true));
   const [collapsed, setCollapsed] = useState(() => loadJson(COLLAPSE_KEY, {}));
@@ -189,9 +213,17 @@ export default function Containers({ containers, reload, loaded }) {
   }
 
   const q = filter.trim().toLowerCase();
-  const shown = useMemo(() => containers.filter((c) =>
-    !q || c.name.toLowerCase().includes(q) || c.image.toLowerCase().includes(q)
-    || (c.compose?.project || '').toLowerCase().includes(q)), [containers, q]);
+  const shown = useMemo(
+    () =>
+      containers.filter(
+        (c) =>
+          !q ||
+          c.name.toLowerCase().includes(q) ||
+          c.image.toLowerCase().includes(q) ||
+          (c.compose?.project || '').toLowerCase().includes(q),
+      ),
+    [containers, q],
+  );
 
   const groups = useMemo(() => {
     const map = new Map();
@@ -221,15 +253,23 @@ export default function Containers({ containers, reload, loaded }) {
           </p>
         </div>
         <div className="btn-row" style={{ alignItems: 'center' }}>
-          <button className="btn sm" onClick={toggleGrouping} title="Toggle grouping by compose project">
+          <button
+            className="btn sm"
+            onClick={toggleGrouping}
+            title="Toggle grouping by compose project"
+          >
             {grouped ? 'Ungroup' : 'Group by project'}
           </button>
           {grouped && (
             <button
               className="btn sm"
-              onClick={() => persistCollapsed(
-                Object.keys(collapsed).length ? {} : Object.fromEntries(groups.map(([k]) => [k, true])),
-              )}
+              onClick={() =>
+                persistCollapsed(
+                  Object.keys(collapsed).length
+                    ? {}
+                    : Object.fromEntries(groups.map(([k]) => [k, true])),
+                )
+              }
             >
               {Object.keys(collapsed).length ? 'Expand all' : 'Collapse all'}
             </button>
@@ -248,42 +288,52 @@ export default function Containers({ containers, reload, loaded }) {
 
       {!loaded && (
         <div className="card-grid">
-          {Array.from({ length: 6 }, (_, i) => <SkeletonCard key={i} />)}
+          {Array.from({ length: 6 }, (_, i) => (
+            <SkeletonCard key={i} />
+          ))}
         </div>
       )}
 
       {loaded && !grouped && (
         <div className="card-grid">
-          {shown.map((c) => <ContainerCard key={c.id} c={c} busy={busy[c.id]} onAction={onAction} />)}
+          {shown.map((c) => (
+            <ContainerCard key={c.id} c={c} busy={busy[c.id]} onAction={onAction} />
+          ))}
         </div>
       )}
 
-      {loaded && grouped && groups.map(([name, items]) => {
-        const isCollapsed = !forceOpen && collapsed[name];
-        return (
-          <section key={name} className="group">
-            <GroupHeader
-              name={name}
-              items={items}
-              collapsed={isCollapsed}
-              onToggle={() => persistCollapsed({ ...collapsed, [name]: !collapsed[name] })}
-              onUpdate={() => setUpdating(name)}
-              onRestart={() => setRestarting({
-                project: name,
-                // Distinct compose services, not containers: a scaled service
-                // is several containers but one line in the compose file.
-                services: new Set(items.map((c) => c.compose?.service).filter(Boolean)).size,
-                hasSelf: items.some((c) => c.isSelf),
-              })}
-            />
-            {!isCollapsed && (
-              <div className="card-grid">
-                {items.map((c) => <ContainerCard key={c.id} c={c} busy={busy[c.id]} onAction={onAction} />)}
-              </div>
-            )}
-          </section>
-        );
-      })}
+      {loaded &&
+        grouped &&
+        groups.map(([name, items]) => {
+          const isCollapsed = !forceOpen && collapsed[name];
+          return (
+            <section key={name} className="group">
+              <GroupHeader
+                name={name}
+                items={items}
+                collapsed={isCollapsed}
+                onToggle={() => persistCollapsed({ ...collapsed, [name]: !collapsed[name] })}
+                onUpdate={() => setUpdating(name)}
+                onRestart={() =>
+                  setRestarting({
+                    project: name,
+                    // Distinct compose services, not containers: a scaled service
+                    // is several containers but one line in the compose file.
+                    services: new Set(items.map((c) => c.compose?.service).filter(Boolean)).size,
+                    hasSelf: items.some((c) => c.isSelf),
+                  })
+                }
+              />
+              {!isCollapsed && (
+                <div className="card-grid">
+                  {items.map((c) => (
+                    <ContainerCard key={c.id} c={c} busy={busy[c.id]} onAction={onAction} />
+                  ))}
+                </div>
+              )}
+            </section>
+          );
+        })}
 
       {loaded && !shown.length && (
         <p className="dim">
@@ -307,7 +357,10 @@ export default function Containers({ containers, reload, loaded }) {
           services={restarting.services}
           hasSelf={restarting.hasSelf}
           onCancel={() => setRestarting(null)}
-          onConfirm={() => { setRestartingRun(restarting.project); setRestarting(null); }}
+          onConfirm={() => {
+            setRestartingRun(restarting.project);
+            setRestarting(null);
+          }}
         />
       )}
 

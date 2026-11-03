@@ -155,8 +155,8 @@ docker compose up -d
 
 Rebuilding is then `docker build -t cyrilknops/kissd:dev . && docker compose up -d`.
 Because the tag only exists locally, the panel's **Update** button cannot swap in
-someone else's build: the `pull` fails harmlessly and the container is recreated
-from the image you built.
+someone else's build: the self-update skips pulling buildable services and rebuilds the configured source.
+For other locally built projects, use an explicit build/apply workflow or a guarded policy.
 
 </details>
 
@@ -316,6 +316,21 @@ full window, so nothing can silence the host indefinitely.
 
 Both the toggle and the grace period live in **Settings › Container alerts**,
 which also lists whatever is muted right now.
+
+## 🛡️ Guarded application updates
+
+Projects such as Loadout can use **Guarded update** instead of a bulk recreation.
+An owner-approved `kissd-update.json` pins the exact application release and protects
+the database and other settings. The update verifies a PostgreSQL backup, replaces
+application services one at a time, checks health, and rolls application images back
+on failure. Running deployments block conflicting maintenance and retain a private
+recovery journal if recovery needs attention.
+
+The button keeps an already deployed pinned release unchanged. New releases need
+explicit owner approval after CI and database-compatibility review; the panel does
+not automatically select `latest`. Other projects retain their normal controls,
+with failed image pulls now stopping the update. See the
+[setup, approval and recovery guide](docs/guarded-updates.md).
 
 ## 🔁 Restart all
 

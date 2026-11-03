@@ -4,6 +4,8 @@
 // hand-rebuilt config.
 import Docker from 'dockerode';
 import { spawn } from 'node:child_process';
+import fs from 'node:fs/promises';
+import { selfMaintenanceFile } from './guarded-updates.js';
 import * as registry from './registry.js';
 
 export const docker = new Docker({ socketPath: '/var/run/docker.sock' });
@@ -37,7 +39,10 @@ export function composeInfo(labels = {}) {
     project: labels[L.project] || '',
     workdir,
     service,
-    files: (labels[L.files] || '').split(',').map((f) => f.trim()).filter(Boolean),
+    files: (labels[L.files] || '')
+      .split(',')
+      .map((f) => f.trim())
+      .filter(Boolean),
   };
 }
 
@@ -96,9 +101,14 @@ function computeCpuPerCore(s) {
   const cores = s.cpu_stats.online_cpus || current.length;
   return current.map((value, id) => {
     const prev = previous?.[id];
-    const valid = prevSys > 0 && elapsed > 0 && Number.isFinite(value)
-      && Number.isFinite(prev) && prev >= 0 && value >= prev;
-    return { id, percent: valid ? Math.min(100, (value - prev) / elapsed * cores * 100) : null };
+    const valid =
+      prevSys > 0 &&
+      elapsed > 0 &&
+      Number.isFinite(value) &&
+      Number.isFinite(prev) &&
+      prev >= 0 &&
+      value >= prev;
+    return { id, percent: valid ? Math.min(100, ((value - prev) / elapsed) * cores * 100) : null };
   });
 }
 
@@ -136,8 +146,12 @@ async function sampleStats(ids) {
         memoryLimit: s.memory_stats?.limit || 0,
         rxBytes: Object.values(s.networks || {}).reduce((sum, n) => sum + (n.rx_bytes || 0), 0),
         txBytes: Object.values(s.networks || {}).reduce((sum, n) => sum + (n.tx_bytes || 0), 0),
-        readBytes: (s.blkio_stats?.io_service_bytes_recursive || []).filter((b) => b.op.toLowerCase() === 'read').reduce((sum, b) => sum + b.value, 0),
-        writeBytes: (s.blkio_stats?.io_service_bytes_recursive || []).filter((b) => b.op.toLowerCase() === 'write').reduce((sum, b) => sum + b.value, 0),
+        readBytes: (s.blkio_stats?.io_service_bytes_recursive || [])
+          .filter((b) => b.op.toLowerCase() === 'read')
+          .reduce((sum, b) => sum + b.value, 0),
+        writeBytes: (s.blkio_stats?.io_service_bytes_recursive || [])
+          .filter((b) => b.op.toLowerCase() === 'write')
+          .reduce((sum, b) => sum + b.value, 0),
         pids: s.pids_stats?.current ?? null,
         restartCount: info?.RestartCount ?? null,
         oomKilled: info?.State?.OOMKilled ?? false,
@@ -161,11 +175,19 @@ export function stats(ids) {
 // batch runs at once, and the collector waits for its completed result.
 export async function refreshStats(ids) {
   if (statsRefreshing) return statsRefreshing;
-  if (Date.now() - statsCache.at < STATS_TTL && ids.every((id) => Object.hasOwn(statsCache.data, id))) return statsCache.data;
-  statsRefreshing = sampleStats(ids).then((data) => {
-    statsCache = { at: Date.now(), data };
-    return data;
-  }).finally(() => { statsRefreshing = null; });
+  if (
+    Date.now() - statsCache.at < STATS_TTL &&
+    ids.every((id) => Object.hasOwn(statsCache.data, id))
+  )
+    return statsCache.data;
+  statsRefreshing = sampleStats(ids)
+    .then((data) => {
+      statsCache = { at: Date.now(), data };
+      return data;
+    })
+    .finally(() => {
+      statsRefreshing = null;
+    });
   return statsRefreshing;
 }
 
@@ -337,22 +359,25 @@ async function selfDataHostPath() {
 // Both take the same parameters ($1 docker config dir, $2 working dir,
 // $3 service or empty, then the -p/-f flags) so one spawn serves either.
 //
-// --ignore-pull-failures is what keeps this working for a kissd that builds its
+// --ignore-buildable is what keeps this working for a kissd that builds its
 // own image rather than pulling the published one: a `build: .` service with a
 // local-only `image:` makes a plain `pull` exit non-zero, and the && would then
 // skip the `up -d --build` that does the actual work. Nothing would be updated,
 // and with stdio ignored nobody would ever find out.
 const SELF_UPDATE_SH = `
+set -eu
+marker=$4
+trap 'rm -f -- "$marker"' EXIT
 sleep 1
 if [ -n "$1" ]; then DOCKER_CONFIG=$1; export DOCKER_CONFIG; fi
 cd "$2" || exit 1
 svc=$3
-shift 3
+shift 4
 if [ -n "$svc" ]; then
-  docker compose "$@" pull --ignore-pull-failures "$svc"
+  docker compose "$@" pull --ignore-buildable "$svc"
   docker compose "$@" up -d --build "$svc"
 else
-  docker compose "$@" pull --ignore-pull-failures
+  docker compose "$@" pull --ignore-buildable
   docker compose "$@" up -d --build
 fi
 `;
@@ -362,27 +387,50 @@ fi
 // and start again — but restarting the project means restarting kissd, which
 // kills the request that asked for it, so this still goes to the host.
 const SELF_RESTART_SH = `
+set -eu
+marker=$4
+trap 'rm -f -- "$marker"' EXIT
 sleep 1
 if [ -n "$1" ]; then DOCKER_CONFIG=$1; export DOCKER_CONFIG; fi
 cd "$2" || exit 1
-shift 3
+shift 4
 docker compose "$@" restart
 `;
 
 // Replacing or restarting kissd itself would kill the process mid-request, so
 // the compose run is handed to the host (via PID 1's namespaces) and detached —
 // it outlives this container going away.
-function runSelfDetached(script, info, configDir) {
+function runSelfDetached(script, info, configDir, marker) {
   const child = spawn(
     'nsenter',
     [
-      '-t', '1', '-m', '-u', '-i', '-n', '-p', '--',
-      'sh', '-c', script, 'sh',
-      configDir, info.workdir, info.service || '', ...composeFlags(info),
+      '-t',
+      '1',
+      '-m',
+      '-u',
+      '-i',
+      '-n',
+      '-p',
+      '--',
+      'sh',
+      '-c',
+      script,
+      'sh',
+      configDir,
+      info.workdir,
+      info.service || '',
+      marker,
+      ...composeFlags(info),
     ],
     { detached: true, stdio: 'ignore' },
   );
-  child.unref();
+  return new Promise((resolve, reject) => {
+    child.once('error', reject);
+    child.once('spawn', () => {
+      child.unref();
+      resolve();
+    });
+  });
 }
 
 async function selfConfigDir() {
@@ -393,11 +441,27 @@ async function selfConfigDir() {
 
 // `info` may describe one service or a whole project; without a service name
 // the run covers every service.
+async function selfMaintenance(script, info) {
+  const data = await selfDataHostPath();
+  if (!data) throw Error('Cannot locate the persistent maintenance marker on the host');
+  const local = selfMaintenanceFile();
+  await fs.writeFile(
+    local,
+    JSON.stringify({ startedAt: new Date().toISOString(), project: info.project }),
+    { mode: 0o600, flag: 'wx' },
+  );
+  try {
+    await runSelfDetached(script, info, await selfConfigDir(), data + local.slice(DATA_DIR.length));
+  } catch (error) {
+    await fs.rm(local, { force: true });
+    throw error;
+  }
+}
 export async function updateSelfDetached(info) {
-  runSelfDetached(SELF_UPDATE_SH, info, await selfConfigDir());
+  return selfMaintenance(SELF_UPDATE_SH, info);
 }
 
 // `docker compose restart` for the whole project, detached.
 export async function restartSelfDetached(info) {
-  runSelfDetached(SELF_RESTART_SH, info, await selfConfigDir());
+  return selfMaintenance(SELF_RESTART_SH, info);
 }
