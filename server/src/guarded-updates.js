@@ -26,7 +26,7 @@ export async function readPolicy(project) {
  try{stat=await fs.lstat(file);}catch(e){if(e.code==='ENOENT')return null;throw Error('Cannot read update policy');}
  if(!stat.isFile()||stat.isSymbolicLink()||stat.size>65536||(stat.mode&0o022))throw Error('Update policy must be a private regular file');
  let p;try{p=JSON.parse(await fs.readFile(file,'utf8'));}catch{throw Error('Invalid update policy JSON');}
- if(p.version!==1||!Array.isArray(p.services)||p.services.length<1||p.services.length>20||new Set(p.services).size!==p.services.length||p.services.some(s=>!project.services.includes(s))||!project.services.includes(p.database)||p.services.includes(p.database)||!sha.test(p.approvedRevision)||!/^[a-f0-9]{64}$/.test(p.configurationHash)||p.backwardCompatible!==true||!Array.isArray(p.preflight)||!p.preflight.length||!p.preflight.every(validCheck)||!Array.isArray(p.health)||!p.health.length||!p.health.every(validCheck)||(p.order!==undefined&&!argv(p.order)))throw Error('Invalid guarded update policy');
+ if(p.version!==1||!Array.isArray(p.services)||p.services.length<1||p.services.length>20||new Set(p.services).size!==p.services.length||p.services.some(s=>!project.services.includes(s))||!project.services.includes(p.database)||p.services.includes(p.database)||!p.approvedImages||p.services.some(s=>!pin.test(p.approvedImages[s]))||!sha.test(p.approvedRevision)||!/^[a-f0-9]{64}$/.test(p.configurationHash)||p.backwardCompatible!==true||!Array.isArray(p.preflight)||!p.preflight.length||!p.preflight.every(validCheck)||!Array.isArray(p.health)||!p.health.length||!p.health.every(validCheck)||(p.order!==undefined&&!argv(p.order)))throw Error('Invalid guarded update policy');
  return p;
 }
 export async function policySummary(project){try{const p=await readPolicy(project);return p?{mode:'guarded',services:p.services,approvedRevision:p.approvedRevision}:null;}catch{return {mode:'blocked',message:'Update policy needs attention'};}}
@@ -70,7 +70,7 @@ function oldCompose(source,old){
  for(const [s,x]of Object.entries(old))doc.setIn(['services',s,'image'],x.Config.Image);
  return String(doc);
 }
-export function createGuardedUpdater({run=runCommand,inspect,sleep=delay}={}){
+export function createGuardedUpdater({run=runCommand,inspect,sleep=delay,statfs=fs.statfs}={}){
  async function check(checks,project){for(const c of checks){try{const r=await run(c.argv,{cwd:project.workdir,timeoutMs:10000});if(r.stdout.trim()!==c.expect)throw Error();}catch{throw Error('Deployment check failed: '+c.name);}}}
  async function healthy(project,policy,service){
   const deadline=Date.now()+180000;
@@ -87,6 +87,7 @@ export function createGuardedUpdater({run=runCommand,inspect,sleep=delay}={}){
   const old={};const desired={};const protectedBefore={};
   for(const s of policy.services){
    if(!pin.test(cfg.services?.[s]?.image))throw Error('Application images must be pinned by digest');
+   if(policy.approvedImages?.[s]!==cfg.services[s].image)throw Error('Application image is not the approved image');
    old[s]=await inspect(s,project);if(!pin.test(old[s].Config.Image))throw Error('Running application images must be pinned by digest');
    if(!old[s].State.Running)throw Error('Current release is not running');
    let image;try{image=JSON.parse((await run(['docker','image','inspect',cfg.services[s].image])).stdout)[0];}catch{
@@ -107,7 +108,11 @@ export function createGuardedUpdater({run=runCommand,inspect,sleep=delay}={}){
   for(const [file,value]of Object.entries(state))if(value!==null)await fs.writeFile(path.join(dir,path.basename(file)+'.private'),value,{mode:0o600});
   const dump=path.join(dir,'database.dump');emit('Backing up PostgreSQL…\n');
   const database=(await inspect(policy.database,project)).Id;
-  try{await run(['docker','exec',database,'sh','-c','exec pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc'],{outputFile:dump,timeoutMs:120000});await fs.chmod(dump,0o600);if(!(await fs.stat(dump)).size)throw Error();await run(['docker','exec','-i',database,'pg_restore','--list'],{inputFile:dump,timeoutMs:30000});}catch{throw Error('Database backup verification failed; no services changed');}
+  try{
+   const estimate=Number((await run(['docker','exec',database,'sh','-c','exec psql -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\" -At -v ON_ERROR_STOP=1 -c \"SELECT pg_database_size(current_database());\"'],{timeoutMs:10000})).stdout.trim());
+   const disk=await statfs(project.workdir);
+   if(!Number.isSafeInteger(estimate)||estimate<0||disk.bavail*disk.bsize<estimate*1.25+256*1024*1024)throw Error('Insufficient backup space');
+   await run(['docker','exec',database,'sh','-c','exec pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc'],{outputFile:dump,timeoutMs:120000});await fs.chmod(dump,0o600);if(!(await fs.stat(dump)).size)throw Error();await run(['docker','exec','-i',database,'pg_restore','--list'],{inputFile:dump,timeoutMs:30000});}catch{throw Error('Database backup verification failed; no services changed');}
   await job.record({status:'backup-verified',order,previousImages:Object.fromEntries(Object.entries(old).map(([s,x])=>[s,x.Config.Image]))});
   emit('Database archive verified. Starting sequential update.\n');
   await unchanged(project,state);await protectedCheck();await check(policy.preflight,project);
@@ -141,7 +146,7 @@ export function createGuardedUpdater({run=runCommand,inspect,sleep=delay}={}){
   const journal={id,project:project.project,revision:policy.approvedRevision,status:'preflight',startedAt:new Date().toISOString(),touched:[]};
   const job={dir,lines:[],listeners:new Set([onData]),record:async patch=>{Object.assign(journal,patch);await atomic(path.join(dir,'status.json'),JSON.stringify(journal,null,2));}};await job.record({});const emit=line=>{job.lines.push(line);for(const listener of job.listeners)try{listener(line);}catch{}};
   active.set(project.workdir,job);let keepLock=false;
-  job.promise=(async()=>{try{await execute(project,policy,emit,job);await job.record({status:'succeeded',completedAt:new Date().toISOString()});return 0;}catch(e){keepLock=e.recoveryRequired===true;await job.record({status:keepLock?'recovery-required':e.rolledBack?'rolled-back':'failed',completedAt:new Date().toISOString()});throw e;}finally{active.delete(project.workdir);if(!keepLock){const own=JSON.parse(await fs.readFile(lock,'utf8'));if(own.id===id)await fs.rm(lock);}}})();
+  job.promise=(async()=>{try{await execute(project,policy,emit,job);await job.record({status:'succeeded',completedAt:new Date().toISOString()});return 0;}catch(e){keepLock=e.recoveryRequired===true;await job.record({status:keepLock?'recovery-required':e.rolledBack?'rolled-back':'failed',error:e.message,completedAt:new Date().toISOString()});throw e;}finally{active.delete(project.workdir);if(!keepLock){const own=JSON.parse(await fs.readFile(lock,'utf8'));if(own.id===id)await fs.rm(lock);}}})();
   return job.promise;
  }};
 }

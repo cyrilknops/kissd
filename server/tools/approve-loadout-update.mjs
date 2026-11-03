@@ -18,9 +18,10 @@ try{
  const run=argv=>runCommand(argv,{cwd:project.workdir,env:registry.env()});
  const config=JSON.parse((await run(['docker','compose','--project-directory',project.workdir,'-p',project.project,'-f',project.files[0],'config','--format','json'])).stdout);
  const policy=buildLoadoutPolicy({prefix:project.project,origin:args.origin,revision:args.revision,ciRun:args['ci-run'],config});
+ if(!project.services.includes(policy.database)||policy.services.some(s=>!project.services.includes(s)))throw Error('Loadout services do not match this project');
  for(const name of policy.services){const ref=config.services[name]?.image;if(!/^.+@sha256:[a-f0-9]{64}$/.test(ref||''))throw Error('Pin every application image by digest before approval');const image=JSON.parse((await run(['docker','image','inspect',ref])).stdout)[0];if(image.Config.Labels?.['org.opencontainers.image.revision']!==args.revision)throw Error('Pull and verify all approved images first');}
  const target=path.join(project.workdir,'kissd-update.json');
- try{const previous=await fs.lstat(target);if(!previous.isFile()||previous.isSymbolicLink())throw Error('Policy must be a regular file');await fs.copyFile(target,path.join(root,'previous-policy-'+id+'.json'));}catch(e){if(e.code!=='ENOENT')throw e;}
+ try{const previous=await fs.lstat(target);if(!previous.isFile()||previous.isSymbolicLink())throw Error('Policy must be a regular file');await fs.writeFile(path.join(root,'previous-policy-'+id+'.json'),await fs.readFile(target),{mode:0o600,flag:'wx'});}catch(e){if(e.code!=='ENOENT')throw e;}
  const temp=target+'.'+id+'.tmp';await fs.writeFile(temp,JSON.stringify(policy,null,2)+'\n',{mode:0o600,flag:'wx'});await fs.rename(temp,target);await readPolicy(project);
  console.log(JSON.stringify({approved:true,project:project.project,revision:args.revision,services:policy.services,databaseExcluded:policy.database,ciRun:policy.ciRun}));
 }finally{await fs.unlink(lock);}
