@@ -116,5 +116,5 @@ test('external configuration changes keep recovery locked and are never overwrit
  assert.equal(await fs.readFile(path.join(f.dir,'.env'),'utf8'),'OWNER_EDIT=preserved\n');await assert.rejects(module.assertIdle(f.project),/recovery/i);
 });
 
-test('an approved source revision cannot be used with different unapproved image digests',async t=>{const f=await fixture(t);f.config.services['api-a'].image=ref('g');await fs.writeFile(f.file,JSON.stringify(f.config));await assert.rejects(f.updater.update(f.project,f.policy,()=>{}),/approved.*image|image.*approved/i);assert.equal(f.calls.some(a=>a.includes('up')),false);});
+test('an approved source revision cannot be used with different unapproved image digests',async t=>{const f=await fixture(t);f.config.services['api-a'].image=ref('e');await fs.writeFile(f.file,JSON.stringify(f.config));await assert.rejects(f.updater.update(f.project,f.policy,()=>{}),/approved.*image|image.*approved/i);assert.equal(f.calls.some(a=>a.includes('up')),false);});
 test('insufficient backup space stops before database dumping or container changes',async t=>{const f=await fixture(t,{noSpace:true});await assert.rejects(f.updater.update(f.project,f.policy,()=>{}),/space|backup/i);assert.equal(f.calls.some(a=>a.includes('up')||a.some(v=>v.includes('pg_dump'))),false);});
