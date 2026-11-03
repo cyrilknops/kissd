@@ -12,6 +12,17 @@ async function fixture(t, options = {}) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'kissd-guarded-'));
   t.after(() => fs.rm(dir, { recursive: true, force: true }));
   const file = path.join(dir, 'compose.yml');
+  const bin = path.join(dir, 'bin');
+  if (options.archiveVerifier) {
+    await fs.mkdir(bin);
+    await fs.writeFile(
+      path.join(bin, 'pg_restore'),
+      `#!${process.execPath}
+process.stdin.once('data', () => { process.stderr.write('private-database-detail'); process.exit(${options.archiveExitCode ?? 0}); });
+`,
+      { mode: 0o700 },
+    );
+  }
   const config = {
     name: 'fixture',
     services: {
@@ -99,11 +110,24 @@ async function fixture(t, options = {}) {
       return { stdout: JSON.stringify(JSON.parse(await fs.readFile(file, 'utf8'))) };
     if (argv.some((a) => a.includes('pg_dump'))) {
       if (options.backupFail) throw Error('backup failed');
-      await fs.writeFile(opts.outputFile, 'verified archive');
+      await fs.writeFile(
+        opts.outputFile,
+        options.archiveVerifier ? Buffer.alloc(8 * 1024 * 1024, 'x') : 'verified archive',
+      );
       return { stdout: '' };
     }
     if (argv.some((a) => a.includes('pg_database_size'))) return { stdout: '1024' };
-    if (argv.includes('pg_restore')) return { stdout: 'archive list' };
+    if (argv.some((v) => v.includes('pg_restore'))) {
+      if (options.archiveVerifier)
+        return module.runCommand(argv.slice(4), {
+          ...opts,
+          env: {
+            ...process.env,
+            PATH: bin + path.delimiter + process.env.PATH,
+          },
+        });
+      return { stdout: 'archive list' };
+    }
     if (argv.includes('up')) {
       const service = argv.at(-1);
       const cfg = JSON.parse(await fs.readFile(file, 'utf8'));
@@ -198,6 +222,25 @@ for (const options of [{ backupFail: true }, { pullFail: true }, { noSpace: true
       assert(!f.calls.some((a) => a.includes('up')));
     },
   );
+test('archive listing can finish before a large input stream without failing the update', async (t) => {
+  const f = await fixture(t, { archiveVerifier: true });
+  await f.updater.update(f.project, f.policy, () => {});
+  assert.equal(f.calls.filter((a) => a.includes('up')).length, 3);
+});
+test('a failed archive listing still stops before replacing services and hides private details', async (t) => {
+  const f = await fixture(t, { archiveVerifier: true, archiveExitCode: 23 });
+  const source = await fs.readFile(f.file, 'utf8');
+  const messages = [];
+  await assert.rejects(
+    f.updater.update(f.project, f.policy, (line) => messages.push(line)),
+    (error) =>
+      /backup verification failed during archive listing/.test(error.message) &&
+      !error.message.includes('private-database-detail'),
+  );
+  assert(!f.calls.some((a) => a.includes('up')));
+  assert.equal(await fs.readFile(f.file, 'utf8'), source);
+  assert(!messages.join('').includes('private-database-detail'));
+});
 test('guarded update backs up before sequential replacements, excludes DB and preserves configuration', async (t) => {
   const f = await fixture(t);
   const messages = [];
@@ -212,7 +255,7 @@ test('guarded update backs up before sequential replacements, excludes DB and pr
   );
   const backupIndex = f.calls.findIndex((a) => a.some((v) => v.includes('pg_dump')));
   assert(backupIndex >= 0 && backupIndex < f.calls.findIndex((a) => a.includes('up')));
-  assert(f.calls.some((a) => a.includes('pg_restore')));
+  assert(f.calls.some((a) => a.some((v) => v.includes('pg_restore'))));
   assert.equal(f.containers.db.State.StartedAt, 'before');
   assert.equal((await fs.readFile(path.join(f.dir, '.kissd', '.gitignore'), 'utf8')).trim(), '*');
   assert.equal(await fs.readFile(f.file, 'utf8'), JSON.stringify(f.config));
@@ -274,7 +317,7 @@ for (const options of [{ healthFail: true }, { upFail: true }, { healthFail: tru
       assert.equal(f.containers['api-b'].Config.Image, ref('a'));
       assert.equal(f.containers.db.State.StartedAt, 'before');
       assert.equal(
-        f.calls.filter((a) => a.includes('pg_restore')).length,
+        f.calls.filter((a) => a.some((v) => v.includes('pg_restore'))).length,
         1,
         'Only archive verification; never restore live database data',
       );
