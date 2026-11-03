@@ -3,17 +3,17 @@
 // Every path is checked against an allowlist rebuilt from Docker's own labels
 // on each request, so only files that actually define a running project can be
 // read or written. Nothing here accepts a caller-supplied path directly.
-import fs from 'node:fs/promises';
-import path from 'node:path';
-import { spawn } from 'node:child_process';
+import fs from "node:fs/promises";
+import path from "node:path";
+import { spawn } from "node:child_process";
 import {
   docker,
   composeInfo,
   updateSelfDetached,
   restartSelfDetached,
   SELF_NAME,
-} from './docker.js';
-import * as registry from './registry.js';
+} from "./docker.js";
+import * as registry from "./registry.js";
 import {
   readPolicy,
   policySummary,
@@ -22,10 +22,10 @@ import {
   createGuardedUpdater,
   runCommand,
   withMaintenance,
-} from './guarded-updates.js';
+} from "./guarded-updates.js";
 
-const DATA_DIR = process.env.DATA_DIR || '/data';
-const BACKUP_DIR = path.join(DATA_DIR, 'compose-backups');
+const DATA_DIR = process.env.DATA_DIR || "/data";
+const BACKUP_DIR = path.join(DATA_DIR, "compose-backups");
 const MAX_BYTES = 512 * 1024;
 
 // Groups running containers into their compose projects.
@@ -50,11 +50,13 @@ export async function projects() {
       });
     }
     const entry = map.get(info.project);
-    for (const f of info.files) if (!entry.files.includes(f)) entry.files.push(f);
+    for (const f of info.files)
+      if (!entry.files.includes(f)) entry.files.push(f);
     entry.services.add(info.service);
     entry.containers += 1;
-    if (c.State === 'running') entry.running += 1;
-    if ((c.Names || []).some((n) => n.replace(/^\//, '') === SELF_NAME)) entry.hasSelf = true;
+    if (c.State === "running") entry.running += 1;
+    if ((c.Names || []).some((n) => n.replace(/^\//, "") === SELF_NAME))
+      entry.hasSelf = true;
   }
 
   const result = [...map.values()].map((e) => ({
@@ -63,7 +65,9 @@ export async function projects() {
     files: e.files.sort(),
   }));
   return (
-    await Promise.all(result.map(async (p) => ({ ...p, updatePolicy: await policySummary(p) })))
+    await Promise.all(
+      result.map(async (p) => ({ ...p, updatePolicy: await policySummary(p) })),
+    )
   ).sort((a, b) => a.project.localeCompare(b.project));
 }
 
@@ -79,7 +83,9 @@ async function resolveOrThrow(filePath) {
   const allowed = await allowedFiles();
   const project = allowed.get(filePath);
   if (!project) {
-    throw new Error('That file is not a compose file of any project on this host');
+    throw new Error(
+      "That file is not a compose file of any project on this host",
+    );
   }
   return project;
 }
@@ -87,8 +93,8 @@ async function resolveOrThrow(filePath) {
 export async function read(filePath) {
   const project = await resolveOrThrow(filePath);
   const stat = await fs.stat(filePath);
-  if (stat.size > MAX_BYTES) throw new Error('File is too large to edit here');
-  const content = await fs.readFile(filePath, 'utf8');
+  if (stat.size > MAX_BYTES) throw new Error("File is too large to edit here");
+  const content = await fs.readFile(filePath, "utf8");
   return {
     path: filePath,
     project: project.project,
@@ -105,22 +111,22 @@ export async function read(filePath) {
 
 function runCompose(args, cwd) {
   return new Promise((resolve) => {
-    let out = '';
-    const child = spawn('docker', args, { cwd, env: registry.env() });
-    child.stdout.on('data', (d) => {
+    let out = "";
+    const child = spawn("docker", args, { cwd, env: registry.env() });
+    child.stdout.on("data", (d) => {
       out += d.toString();
     });
-    child.stderr.on('data', (d) => {
+    child.stderr.on("data", (d) => {
       out += d.toString();
     });
-    child.on('error', (err) => resolve({ code: 1, out: err.message }));
-    child.on('close', (code) => resolve({ code: code ?? 1, out }));
+    child.on("error", (err) => resolve({ code: 1, out: err.message }));
+    child.on("close", (code) => resolve({ code: code ?? 1, out }));
   });
 }
 
 function composeArgs(project, sub, extra = []) {
-  const args = ['compose', '-p', project.project];
-  for (const f of project.files) args.push('-f', f);
+  const args = ["compose", "-p", project.project];
+  for (const f of project.files) args.push("-f", f);
   return [...args, sub, ...extra];
 }
 
@@ -129,7 +135,7 @@ async function backup(project, filePath, content) {
   await fs.mkdir(dir, { recursive: true });
   // Timestamp comes from the file write itself, not the clock name, so
   // repeated saves in the same second don't collide.
-  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const target = path.join(dir, `${stamp}--${path.basename(filePath)}`);
   await fs.writeFile(target, content, { mode: 0o600 });
   return target;
@@ -140,29 +146,35 @@ async function backup(project, filePath, content) {
 export async function write(filePath, content, expectedMtimeMs) {
   const project = await resolveOrThrow(filePath);
   await assertIdle(project);
-  if (typeof content !== 'string') throw new Error('Content must be a string');
-  if (Buffer.byteLength(content) > MAX_BYTES) throw new Error('Content is too large');
+  if (typeof content !== "string") throw new Error("Content must be a string");
+  if (Buffer.byteLength(content) > MAX_BYTES)
+    throw new Error("Content is too large");
 
   const stat = await fs.stat(filePath);
   if (expectedMtimeMs && Math.abs(stat.mtimeMs - expectedMtimeMs) > 1) {
-    throw new Error('The file changed on disk since you opened it — reload before saving');
+    throw new Error(
+      "The file changed on disk since you opened it — reload before saving",
+    );
   }
 
-  const previous = await fs.readFile(filePath, 'utf8');
+  const previous = await fs.readFile(filePath, "utf8");
   if (previous === content) {
     return { saved: false, unchanged: true, project: project.project };
   }
 
   const backupPath = await backup(project, filePath, previous);
-  await fs.writeFile(filePath, content, 'utf8');
+  await fs.writeFile(filePath, content, "utf8");
 
-  const check = await runCompose(composeArgs(project, 'config', ['-q']), project.workdir);
+  const check = await runCompose(
+    composeArgs(project, "config", ["-q"]),
+    project.workdir,
+  );
   if (check.code !== 0) {
-    await fs.writeFile(filePath, previous, 'utf8');
+    await fs.writeFile(filePath, previous, "utf8");
     return {
       saved: false,
       valid: false,
-      error: check.out.trim().slice(0, 2000) || 'compose config failed',
+      error: check.out.trim().slice(0, 2000) || "compose config failed",
       rolledBack: true,
       project: project.project,
     };
@@ -192,15 +204,18 @@ function streamSteps(project, steps, onData) {
     const runStep = (idx) => {
       if (idx >= steps.length) return resolve(0);
       const args = steps[idx];
-      onData(`$ docker ${args.join(' ')}\n\n`);
-      const child = spawn('docker', args, { cwd: project.workdir, env: registry.env() });
-      child.stdout.on('data', (d) => onData(d.toString()));
-      child.stderr.on('data', (d) => onData(d.toString()));
-      child.on('error', (err) => {
+      onData(`$ docker ${args.join(" ")}\n\n`);
+      const child = spawn("docker", args, {
+        cwd: project.workdir,
+        env: registry.env(),
+      });
+      child.stdout.on("data", (d) => onData(d.toString()));
+      child.stderr.on("data", (d) => onData(d.toString()));
+      child.on("error", (err) => {
         onData(`\nfailed to run docker: ${err.message}\n`);
         resolve(1);
       });
-      child.on('close', (code) => {
+      child.on("close", (code) => {
         if (code !== 0) return resolve(code ?? 1);
         runStep(idx + 1);
       });
@@ -215,31 +230,40 @@ export async function apply(projectName, onData) {
   return withMaintenance(async () => {
     await assertPlainAction(project);
     if (project.hasSelf) await ensureNoGuardedRuns();
-    return streamSteps(project, [composeArgs(project, 'up', ['-d'])], onData);
+    return streamSteps(project, [composeArgs(project, "up", ["-d"])], onData);
   });
 }
 
 // Returned instead of an exit code when the run was handed to the host. There
 // is no status to wait for, so the caller must not claim the update finished.
-export const DETACHED = 'detached';
+export const DETACHED = "detached";
 
 // Pulls every image in the project, then recreates the services whose image
-// actually changed. --ignore-pull-failures keeps a locally-built service (one
-// with no image to pull) from aborting the update for everything else.
+// actually changed. Pull failures stop before any service is recreated.
 export async function update(projectName, onData) {
   const project = await findProject(projectName);
   const policy = await readPolicy(project);
   if (policy) {
     const run = (argv, options = {}) =>
-      runCommand(argv, { ...options, cwd: options.cwd ?? project.workdir, env: registry.env() });
+      runCommand(argv, {
+        ...options,
+        cwd: options.cwd ?? project.workdir,
+        env: registry.env(),
+      });
     const updater = createGuardedUpdater({
       run,
       inspect: async (service, p) => {
-        const ids = (await run(composeArgs(p, 'ps', ['--all', '-q', service]))).stdout
+        const ids = (
+          await run([
+            "docker",
+            ...composeArgs(p, "ps", ["--all", "-q", service]),
+          ])
+        ).stdout
           .trim()
-          .split('\n')
+          .split("\n")
           .filter(Boolean);
-        if (ids.length !== 1) throw Error('Guarded services must have exactly one container each');
+        if (ids.length !== 1)
+          throw Error("Guarded services must have exactly one container each");
         return docker.getContainer(ids[0]).inspect();
       },
     });
@@ -251,15 +275,19 @@ export async function update(projectName, onData) {
     if (project.hasSelf) {
       await ensureNoGuardedRuns();
       onData(`This project runs kissd itself (${SELF_NAME}).\n`);
-      onData('Handing the compose run to the host so it survives this container being replaced.\n');
-      onData('The panel will drop out for a few seconds — reload once it returns.\n');
+      onData(
+        "Handing the compose run to the host so it survives this container being replaced.\n",
+      );
+      onData(
+        "The panel will drop out for a few seconds — reload once it returns.\n",
+      );
       await updateSelfDetached(project);
       return DETACHED;
     }
 
     return streamSteps(
       project,
-      [composeArgs(project, 'pull'), composeArgs(project, 'up', ['-d'])],
+      [composeArgs(project, "pull"), composeArgs(project, "up", ["-d"])],
       onData,
     );
   });
@@ -277,13 +305,17 @@ export async function restart(projectName, onData) {
     if (project.hasSelf) {
       await ensureNoGuardedRuns();
       onData(`This project runs kissd itself (${SELF_NAME}).\n`);
-      onData('Handing the compose run to the host so it survives kissd restarting.\n');
-      onData('The panel will drop out for a few seconds — reload once it returns.\n');
+      onData(
+        "Handing the compose run to the host so it survives kissd restarting.\n",
+      );
+      onData(
+        "The panel will drop out for a few seconds — reload once it returns.\n",
+      );
       await restartSelfDetached(project);
       return DETACHED;
     }
 
-    return streamSteps(project, [composeArgs(project, 'restart')], onData);
+    return streamSteps(project, [composeArgs(project, "restart")], onData);
   });
 }
 
@@ -307,7 +339,7 @@ export async function readBackup(projectName, name) {
   // basename() keeps a crafted name from climbing out of the backup directory.
   const safe = path.basename(name);
   const file = path.join(BACKUP_DIR, projectName, safe);
-  return fs.readFile(file, 'utf8');
+  return fs.readFile(file, "utf8");
 }
 
 // Shared by container actions and maintenance so other controls cannot interrupt a guarded run.
