@@ -218,7 +218,7 @@ test('configuration drift and mutable image refs are refused before changing con
     false,
   );
 });
-for (const options of [{ healthFail: true }, { upFail: true }])
+for (const options of [{ healthFail: true }, { upFail: true },{healthFail:true,latest:true}])
   test(
     'failed replacement restores actual old pins and changed replicas without restoring the database ' +
       JSON.stringify(options),

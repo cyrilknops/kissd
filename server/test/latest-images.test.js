@@ -21,7 +21,7 @@ function fixture(options = {}) {
     const web = argv[3].includes('/web');
     const repository = web ? 'web' : 'api';
     const char = web ? 'd' : 'c';
-    return {stdout: JSON.stringify([{Id:'sha256:'+char.repeat(64), RepoDigests:[ref(repository,char)], Config:{Labels:{'org.opencontainers.image.revision': options.mismatch && web ? 'f'.repeat(40) : revision}}}])};
+    return {stdout: JSON.stringify([{Id:'sha256:'+(options.digestMismatch && argv[3].includes('@') ? '0' : char).repeat(64), RepoDigests:options.noDigest ? [] : [ref(repository,char)], Config:{Labels:{'org.opencontainers.image.revision': options.noRevision ? '' : options.mismatch && web ? 'f'.repeat(40) : revision}}}])};
   };
   return {policy, config, run, calls};
 }
@@ -33,7 +33,7 @@ test('latest is fetched once per repository and frozen as immutable coherent rel
   assert.deepEqual(result.refs,{'api-a':ref('api','c'),'api-b':ref('api','c'),web:ref('web','d')});
   assert.equal(f.calls.filter(a=>a[1]==='pull').length,2);
 });
-for (const [name,options,pattern] of [['failed pull',{pullFail:true},/pull/i],['mixed release',{mismatch:true},/revision|release/i]]) {
+for (const [name,options,pattern] of [['failed pull',{pullFail:true},/pull/i],['mixed release',{mismatch:true},/revision|release/i],['missing digest',{noDigest:true},/digest/i],['digest mismatch',{digestMismatch:true},/digest/i],['missing revision',{noRevision:true},/revision/i]]) {
   test(name+' refuses latest without exposing registry details',async()=>{
     assert.ok(resolver);
     const f=fixture(options);
