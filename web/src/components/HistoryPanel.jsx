@@ -21,7 +21,7 @@ function tick(at, range) {
     : { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
-function Chart({ title, series, format, history, hover, onHover, floor = 0 }) {
+function Chart({ title, series, format, history, hover, onHover, floor = 0, children }) {
   const svgRef = useRef(null);
   const [width, setWidth] = useState(500);
   useEffect(() => {
@@ -32,7 +32,8 @@ function Chart({ title, series, format, history, hover, onHover, floor = 0 }) {
   const { points, from, to, intervalMs, availability } = history;
   const W = Math.max(280, width), H = 180, L = 65, R = 12, T = 12, B = 25;
   const x = (at) => L + (at - from) / (to - from) * (W - L - R);
-  const ceiling = Math.max(floor, ...points.flatMap((p) => series.map((s) => p[`${s.key}Peak`] ?? p[s.key] ?? 0)), 1);
+  // Avoid spreading cores × samples into function arguments on large hosts.
+  const ceiling = points.reduce((max, p) => series.reduce((value, s) => Math.max(value, p[`${s.key}Peak`] ?? p[s.key] ?? 0), max), Math.max(floor, 1));
   const y = (value) => H - B - value / ceiling * (H - B - T);
   const selected = hover === null || !points.length ? null : points.reduce((best, p) => Math.abs(p.at - hover) < Math.abs(best.at - hover) ? p : best, points[0]);
   function line(key) {
@@ -48,9 +49,10 @@ function Chart({ title, series, format, history, hover, onHover, floor = 0 }) {
   return (
     <div className="card metric-chart">
       <h3>{title}</h3>
+      {children}
       <div className="chart-readout">
         <span className="dim">{selected ? stamp(selected.at) : 'Hover or focus the chart to inspect'}</span>
-        {series.map((s) => <span key={s.key} style={{ color: s.color }}>{s.label}{selected ? '' : ' avg'}: {format(selected ? selected[s.key] : history.summary[`${s.key}Avg`])}</span>)}
+        {series.map((s) => <span key={s.key} style={{ color: s.color }}>{s.label}{selected ? '' : ' avg'}: {format(selected ? selected[s.key] : history.summary[`${s.key}Avg`])}{selected && ` · peak ${format(selected[`${s.key}Peak`])}`}</span>)}
       </div>
       <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} role="img" tabIndex={0}
         aria-label={`${title} history. Use left and right arrow keys to inspect samples.`}
@@ -72,7 +74,8 @@ function Chart({ title, series, format, history, hover, onHover, floor = 0 }) {
         {availability.filter((a) => a.state !== 'up').map((a) => <rect key={a.from} x={x(a.from)} y={T} width={Math.max(0, x(a.to) - x(a.from))} height={H - B - T} fill={COLORS[a.state]} opacity={a.state === 'unknown' ? 0.06 : 0.14}>
           <title>{LABELS[a.state]} · {stamp(a.from)} – {stamp(a.to)}</title>
         </rect>)}
-        {series.map((s) => <g key={s.key}>
+        {series.map((s) => <g key={s.key} data-series={s.key}>
+          <title>{s.label}</title>
           <path d={line(`${s.key}Peak`)} fill="none" stroke={s.color} strokeOpacity="0.35" strokeWidth="1" vectorEffect="non-scaling-stroke" />
           <path d={line(s.key)} fill="none" stroke={s.color} strokeWidth="1.8" vectorEffect="non-scaling-stroke" />
           {points.length === 1 && Number.isFinite(points[0][s.key]) && <circle cx={x(points[0].at)} cy={y(points[0][s.key])} r="3" fill={s.color} />}
@@ -83,9 +86,39 @@ function Chart({ title, series, format, history, hover, onHover, floor = 0 }) {
         </g>}
         {(W < 500 ? [0, 1] : [0, 0.5, 1]).map((fraction) => <text key={fraction} x={x(from + (to - from) * fraction)} y={H - 3} textAnchor={fraction === 0 ? 'start' : fraction === 1 ? 'end' : 'middle'}>{tick(from + (to - from) * fraction, history.range)}</text>)}
       </svg>
-      <div className="hint">Solid: average · faint: peak per {elapsed(intervalMs)} bucket{selected && ` · peak ${series.map((s) => `${s.label} ${format(selected[`${s.key}Peak`])}`).join(' / ')}`}</div>
+      <div className="hint">Solid: average · faint: peak per {elapsed(intervalMs)} bucket</div>
     </div>
   );
+}
+
+function CpuChart({ history, host, hover, onHover, chosen, onChoose }) {
+  const cores = history.cpuCores || [];
+  const selected = chosen === null ? cores : chosen;
+  const series = [
+    { key: 'cpu', label: host ? 'Host' : 'Container total', color: '#4f8cff' },
+    ...cores.filter((id) => selected.includes(id)).map((id) => ({
+      key: `cpuCore${id}`, label: `CPU ${id}`, color: `hsl(${(id * 137.508 + 22) % 360} 75% 65%)`,
+    })),
+  ];
+  return <Chart title="CPU utilization" {...{ series, history, hover, onHover }} format={pct} floor={host ? 100 : 0}>
+    <p className="hint">{host ? 'Logical CPUs · host average is across all CPUs.' : 'Container total: 100% = one logical CPU. Per-core lines show where CPU time was used.'}</p>
+    {!host && <p className="hint">{history.cpuSet == null ? 'Docker CPU pinning unavailable in the last observation.'
+      : history.cpuSet ? `Last observed Docker CPU pinning: ${history.cpuSet}. Pinning limits where a container can run.`
+        : 'Last observed: no Docker CPU pinning; the scheduler chooses CPUs.'}</p>}
+    {cores.length > 0 ? <details className="cpu-series-controls">
+      <summary>CPU series · {cores.filter((id) => selected.includes(id)).length} of {cores.length} cores shown</summary>
+      <div className="btn-row">
+        <button className="btn sm" onClick={() => onChoose(null)}>Show all cores</button>
+        <button className="btn sm" onClick={() => onChoose([])}>Aggregate only</button>
+      </div>
+      <div className="cpu-series-options" role="group" aria-label="CPU cores to chart">
+        {cores.map((id) => <label key={id}>
+          <input type="checkbox" checked={selected.includes(id)} onChange={(e) => onChoose(e.target.checked ? [...selected, id] : selected.filter((core) => core !== id))} /> CPU {id}
+        </label>)}
+      </div>
+    </details> : <p className="hint">{host ? 'Per-core history starts with new samples after this update.'
+      : 'No per-core samples in this timeframe. Docker may not expose per-core usage on this host (common with cgroup v2).'}</p>}
+  </Chart>;
 }
 
 export default function HistoryPanel({ target = 'host', onTargetChange, compact = false }) {
@@ -94,6 +127,8 @@ export default function HistoryPanel({ target = 'host', onTargetChange, compact 
   const [error, setError] = useState('');
   const [hover, setHover] = useState(null);
   const [retry, setRetry] = useState(0);
+  const [chosenCores, setChosenCores] = useState(null); // null selects all observed CPUs
+  useEffect(() => { setChosenCores(null); }, [target]);
   useEffect(() => {
     let stop = false, pending = false;
     setHistory(null);
@@ -155,7 +190,7 @@ export default function HistoryPanel({ target = 'host', onTargetChange, compact 
           <div className="hint">Container availability uses Docker state and healthchecks, not external HTTP probes. Gaps while kissd is offline are unknown. Outages shorter than 30s may be missed.</div>
         </div>
         <div className="grid cols-2 metrics-charts">
-          {chart('CPU utilization', [{ key: 'cpu', label: 'CPU', color: '#4f8cff' }], pct, host ? 100 : 0)}
+          <CpuChart {...{ history, host, hover }} onHover={setHover} chosen={chosenCores} onChoose={setChosenCores} />
           {chart('Memory usage', [{ key: 'memory', label: 'Memory', color: '#2ecc71' }], bytes)}
           {!compact && <>
             {chart('Network traffic', [{ key: 'rxRate', label: 'Receive', color: '#4f8cff' }, { key: 'txRate', label: 'Send', color: '#b18aff' }], speed)}

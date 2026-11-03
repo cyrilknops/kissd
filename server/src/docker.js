@@ -85,6 +85,23 @@ function computeCpuPercent(s) {
   return Math.max(0, (cpuDelta / sysDelta) * cores * 100);
 }
 
+function computeCpuPerCore(s) {
+  const current = s.cpu_stats?.cpu_usage?.percpu_usage;
+  // cgroup v2 normally exposes only aggregate container CPU time. Do not
+  // divide that total across CPUs or mistake CPU affinity for actual usage.
+  if (!Array.isArray(current) || !current.length) return null;
+  const previous = s.precpu_stats?.cpu_usage?.percpu_usage;
+  const prevSys = s.precpu_stats?.system_cpu_usage;
+  const elapsed = s.cpu_stats.system_cpu_usage - prevSys;
+  const cores = s.cpu_stats.online_cpus || current.length;
+  return current.map((value, id) => {
+    const prev = previous?.[id];
+    const valid = prevSys > 0 && elapsed > 0 && Number.isFinite(value)
+      && Number.isFinite(prev) && prev >= 0 && value >= prev;
+    return { id, percent: valid ? Math.min(100, (value - prev) / elapsed * cores * 100) : null };
+  });
+}
+
 async function mapLimited(items, limit, fn) {
   const out = [];
   let i = 0;
@@ -113,6 +130,8 @@ async function sampleStats(ids) {
       const cache = s.memory_stats?.stats?.inactive_file ?? s.memory_stats?.stats?.cache ?? 0;
       data[id] = {
         cpu: computeCpuPercent(s),
+        cpuPerCore: computeCpuPerCore(s),
+        cpuSet: info?.HostConfig?.CpusetCpus ?? null,
         memory: Math.max(0, usage - cache),
         memoryLimit: s.memory_stats?.limit || 0,
         rxBytes: Object.values(s.networks || {}).reduce((sum, n) => sum + (n.rx_bytes || 0), 0),
@@ -225,6 +244,7 @@ export async function detail(id) {
     exitCode: info.State?.ExitCode ?? null,
     restartCount: info.RestartCount || 0,
     restartPolicy: info.HostConfig?.RestartPolicy?.Name || 'no',
+    cpuSet: info.HostConfig?.CpusetCpus ?? null,
     command: [info.Path, ...(info.Args || [])].filter(Boolean).join(' '),
     ports: portList(info.NetworkSettings),
     mounts: (info.Mounts || []).map((m) => ({

@@ -22,9 +22,13 @@ for (let i = 20160; i > 0; i--) {
   const cpu = 15 + Math.sin(i / 90) * 10 + (i % 700 < 30 ? 45 : 0);
   const down = i > 720 && i < 750;
   const unhealthy = i > 120 && i < 130;
+  // Older aggregate-only samples exercise the upgrade boundary in charts.
+  const cpuPerCore = i <= 120 ? [0, 1, 2, 3].map((id) => ({ id, percent: Math.min(100, cpu * (id + 1) / 2.5) })) : null;
+  const containerCpu = i <= 120 ? [{ id: 0, percent: cpu / 3 }, { id: 2, percent: cpu / 6 }] : null;
   store.record(at, [
-    { target: 'host', name: 'Host', state: 'up', metrics: { cpu, memory: (2.5 + Math.sin(i / 300) * 0.5) * 1024 ** 3, rxRate: 130000 + cpu * 1000, txRate: 80000, load: cpu / 25, diskPercent: 65 - i / 2000, swapPercent: 2, running: down ? 4 : 5, unhealthy: unhealthy ? 1 : 0 } },
-    { target: 'container:web', name: 'web', id: i > 240 ? 'old' : 'new', state: down ? 'down' : unhealthy ? 'unhealthy' : 'up', reason: down ? 'exited' : unhealthy ? 'unhealthy' : 'running', metrics: down ? {} : { cpu: cpu / 2, memory: 300 * 1024 ** 2 + cpu * 100000, rxRate: 20000, txRate: 15000, readRate: cpu * 300, writeRate: cpu * 500, pids: 12, restartCount: i > 240 ? 0 : i > 60 ? 1 : 2 } },
+    { target: 'host', name: 'Host', state: 'up', metrics: { cpu, cpuPerCore, memory: (2.5 + Math.sin(i / 300) * 0.5) * 1024 ** 3, rxRate: 130000 + cpu * 1000, txRate: 80000, load: cpu / 25, diskPercent: 65 - i / 2000, swapPercent: 2, running: down ? 4 : 5, unhealthy: unhealthy ? 1 : 0 } },
+    { target: 'container:web', name: 'web', id: i > 240 ? 'old' : 'new', state: down ? 'down' : unhealthy ? 'unhealthy' : 'up', reason: down ? 'exited' : unhealthy ? 'unhealthy' : 'running', metrics: down ? {} : { cpu: cpu / 2, cpuPerCore: containerCpu, cpuSet: '0,2', memory: 300 * 1024 ** 2 + cpu * 100000, rxRate: 20000, txRate: 15000, readRate: cpu * 300, writeRate: cpu * 500, pids: 12, restartCount: i > 240 ? 0 : i > 60 ? 1 : 2 } },
+    { target: 'container:worker', name: 'worker', id: 'worker', state: 'up', metrics: { cpu: cpu / 4, cpuPerCore: null, cpuSet: '', memory: 100 * 1024 ** 2 } },
   ]);
 }
 const app = express();
@@ -36,7 +40,17 @@ app.post('/api/login', (req, res) => {
   res.json({ ok: true });
 });
 app.get('/api/me', auth.requireAuth, (req, res) => res.json({ user: 'admin' }));
-app.get('/api/containers', auth.requireAuth, (req, res) => res.json([{ id: 'new', name: 'web', state: 'running', health: 'healthy', stats: { cpu: 5, memory: 300 * 1024 ** 2 } }]));
+const containers = [
+  { id: 'new', name: 'web', cpuSet: '0,2', stats: { cpu: 5, cpuSet: '0,2', cpuPerCore: [{ id: 0, percent: 3 }, { id: 2, percent: 2 }], memory: 300 * 1024 ** 2 } },
+  { id: 'worker', name: 'worker', cpuSet: '', stats: { cpu: 2, cpuSet: '', cpuPerCore: null, memory: 100 * 1024 ** 2 } },
+].map((c) => ({ ...c, state: 'running', running: true, health: 'healthy', image: 'fixture:latest', created: now, startedAt: new Date(now - 3600_000).toISOString(), ports: [], mounts: [], networks: [], restartCount: 0, restartPolicy: 'unless-stopped', healthLog: [] }));
+app.get('/api/host', auth.requireAuth, (req, res) => res.json({ cpu: 25, cpuPerCore: [0, 1, 2, 3].map((id) => ({ id, percent: 10 * (id + 1) })), cores: 4, uptime: 86400, load: { one: 1, five: 0.8, fifteen: 0.5 }, memory: { used: 2 * 1024 ** 3, total: 8 * 1024 ** 3, percent: 25, swapTotal: 0 }, network: { rxRate: 1000, txRate: 500, rxBytes: 10000 }, disks: [] }));
+app.get('/api/containers', auth.requireAuth, (req, res) => res.json(containers));
+app.get('/api/containers/:id', auth.requireAuth, (req, res) => {
+  const c = containers.find((c) => c.id === req.params.id || c.name === req.params.id);
+  res.status(c ? 200 : 404).json(c || { error: 'Container not found' });
+});
+app.get('/api/claude', auth.requireAuth, (req, res) => res.json({ installed: false }));
 app.get('/api/alerts', auth.requireAuth, (req, res) => res.json({ log: [], muted: [] }));
 app.get('/api/settings', auth.requireAuth, (req, res) => res.json(settings.redact(settings.load())));
 app.put('/api/settings', auth.requireAuth, (req, res) => {

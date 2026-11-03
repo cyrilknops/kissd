@@ -19,7 +19,7 @@ after(() => fs.rmSync(process.env.DATA_DIR, { recursive: true, force: true }));
 test('authenticated metrics API validates queries, returns stored history and hides storage errors', async (t) => {
   const store = new MetricsStore(path.join(process.env.DATA_DIR, 'metrics.sqlite'));
   const now = Date.now();
-  store.record(now - 30_000, [{ target: 'host', name: 'Host', state: 'up', metrics: { cpu: 5 } }]);
+  store.record(now - 30_000, [{ target: 'host', name: 'Host', state: 'up', metrics: { cpu: 5, cpuPerCore: [{ id: 0, percent: 10 }, { id: 2, percent: null }] } }]);
   const app = express();
   app.use(cookieParser());
   app.post('/session', (req, res) => { auth.issueSession(res); res.json({ ok: true }); });
@@ -40,6 +40,9 @@ test('authenticated metrics API validates queries, returns stored history and hi
   assert.equal(response.headers.get('cache-control'), 'no-store');
   const body = await response.json();
   assert.equal(body.points[0].cpu, 5);
+  assert.deepEqual(body.cpuCores, [0, 2]);
+  assert.equal(body.points[0].cpuCore0, 10);
+  assert.equal(body.points[0].cpuCore2, null);
   assert.equal(body.range, '1h');
   for (const query of ['?range=1y', '?range=1h&range=7d', '?target[x]=host']) assert.equal((await get(query)).status, 400);
   const original = store.history;

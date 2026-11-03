@@ -40,7 +40,8 @@ export class MetricsCollector {
       const h = hostResult.value;
       const previous = previousFor('host', 'host');
       samples.push({ target: 'host', name: 'Host', state: 'up', metrics: {
-        cpu: this.previous.has('host') ? h.cpu : null, memory: h.memory.used, memoryPercent: h.memory.percent,
+        cpu: this.previous.has('host') ? h.cpu : null, cpuPerCore: h.cpuPerCore ?? null,
+        memory: h.memory.used, memoryPercent: h.memory.percent,
         load: h.load.one, swapPercent: h.memory.swapPercent,
         diskPercent: h.disks.length ? Math.max(...h.disks.map((d) => d.percent)) : null,
         rxRate: rate(h.network, previous?.counters, 'rxBytes', previous ? (at - previous.at) / 1000 : 0),
@@ -57,7 +58,8 @@ export class MetricsCollector {
         const previous = previousFor(target, c.id);
         const elapsed = previous ? (at - previous.at) / 1000 : 0;
         const metrics = c.state === 'running' && s ? {
-          cpu: s.cpu, memory: s.memory, memoryPercent: s.memoryLimit ? s.memory / s.memoryLimit * 100 : null,
+          cpu: s.cpu, cpuPerCore: s.cpuPerCore ?? null, cpuSet: s.cpuSet ?? null,
+          memory: s.memory, memoryPercent: s.memoryLimit ? s.memory / s.memoryLimit * 100 : null,
           pids: s.pids, restartCount: s.restartCount, oomKilled: s.oomKilled,
           rxRate: rate(s, previous?.counters, 'rxBytes', elapsed), txRate: rate(s, previous?.counters, 'txBytes', elapsed),
           readRate: rate(s, previous?.counters, 'readBytes', elapsed), writeRate: rate(s, previous?.counters, 'writeBytes', elapsed),

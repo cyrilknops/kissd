@@ -213,7 +213,17 @@ you type a new one.
 Overview shows live usage for each **logical CPU** (including SMT/hyperthreads),
 identified by its Linux CPU number, with a percentage and usage bar refreshed
 every **3 seconds**. A new CPU shows a dash until two samples are available.
-The CPU card and historical charts continue to show aggregate host usage.
+The CPU card shows aggregate host usage. The historical **CPU utilization**
+chart plots the host average and each logical CPU, with controls to show all
+cores, the aggregate only, or selected cores. Per-core history is sampled every
+**30 seconds** and starts after this update; older history remains aggregate-only.
+
+Container cards and details show configured **Docker CPU pinning** separately
+from CPUs used in the latest sample. Container CPU charts also show per-core
+usage when Docker exposes per-CPU counters. Many **cgroup v2** hosts expose only
+aggregate container usage; kissd labels per-core data as unavailable there.
+CPU pinning is a scheduling limit, not proof of which CPU executed a container,
+and containers can move between CPUs during a sample.
 
 **Metrics** shows the host or a container over **1h, 3h, 1d, 3d, or 7d** (7d by
 default). CPU, memory, network traffic, host load/disk/swap, container disk I/O

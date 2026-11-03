@@ -69,16 +69,27 @@ function transitions(rows, from) {
 }
 
 function aggregate(rows, from, intervalMs) {
+  const coreIds = new Set();
+  // Discover CPU series without changing the on-disk JSON format.
+  // Old samples and unsupported Docker hosts have no per-core observations.
+  for (const row of rows) {
+    if (row.at < from) continue;
+    for (const core of Array.isArray(row.metrics.cpuPerCore) ? row.metrics.cpuPerCore : []) {
+      if (!Number.isSafeInteger(core?.id) || core.id < 0) continue;
+      coreIds.add(core.id);
+    }
+  }
+  const cpuCores = [...coreIds].sort((a, b) => a - b);
+  const keys = [...METRICS, ...cpuCores.map((id) => `cpuCore${id}`)];
   const buckets = new Map();
-  const totals = Object.fromEntries(METRICS.map((key) => [key, { sum: 0, count: 0, peak: null }]));
+  const totals = Object.fromEntries(keys.map((key) => [key, { sum: 0, count: 0, peak: null }]));
   for (const row of rows) {
     if (row.at < from) continue;
     const at = from + Math.floor((row.at - from) / intervalMs) * intervalMs;
     let bucket = buckets.get(at);
     if (!bucket) { bucket = { at, values: {} }; buckets.set(at, bucket); }
-    for (const key of METRICS) {
-      const value = row.metrics[key];
-      if (!Number.isFinite(value)) continue;
+    function add(key, value) {
+      if (!Number.isFinite(value)) return;
       const entry = bucket.values[key] ||= { sum: 0, count: 0, peak: value };
       entry.sum += value;
       entry.count++;
@@ -88,10 +99,14 @@ function aggregate(rows, from, intervalMs) {
       total.count++;
       total.peak = total.peak === null ? value : Math.max(total.peak, value);
     }
+    for (const key of METRICS) add(key, row.metrics[key]);
+    for (const core of Array.isArray(row.metrics.cpuPerCore) ? row.metrics.cpuPerCore : []) {
+      if (Number.isSafeInteger(core?.id) && core.id >= 0) add(`cpuCore${core.id}`, core.percent);
+    }
   }
   const points = [...buckets.values()].map(({ at, values }) => {
     const point = { at };
-    for (const key of METRICS) {
+    for (const key of keys) {
       point[key] = values[key] ? values[key].sum / values[key].count : null;
       point[`${key}Peak`] = values[key]?.peak ?? null;
     }
@@ -102,7 +117,7 @@ function aggregate(rows, from, intervalMs) {
     summary[`${key}Avg`] = value.count ? value.sum / value.count : null;
     summary[`${key}Peak`] = value.peak;
   }
-  return { points, summary };
+  return { points, summary, cpuCores };
 }
 
 // One indexed row per target per sample, with a bounded query of at most 7 days.
@@ -160,7 +175,7 @@ export class MetricsStore {
       .all(target, Math.max(cutoff, from - HOLD_MS), now)
       .map((row) => ({ ...row, metrics: JSON.parse(row.metrics) }));
     const intervals = availability(rows, from, now);
-    const { points, summary } = aggregate(rows, from, intervalMs);
+    const { points, summary, cpuCores } = aggregate(rows, from, intervalMs);
     const { events, restarts } = transitions(rows, from);
     const time = (state) => intervals.filter((i) => i.state === state).reduce((sum, i) => sum + i.to - i.from, 0);
     const unknownMs = time('unknown');
@@ -168,7 +183,8 @@ export class MetricsStore {
     return {
       target, range, from, to: now, intervalMs, retentionDays, sampleSeconds: SAMPLE_MS / 1000,
       targets: this.db.prepare('SELECT target, name, last_seen AS lastSeen FROM targets WHERE last_seen >= ? ORDER BY name').all(cutoff),
-      points, availability: intervals, events: events.slice(0, 100),
+      points, cpuCores, cpuSet: rows.at(-1)?.metrics.cpuSet ?? null,
+      availability: intervals, events: events.slice(0, 100),
       summary: {
         ...summary, observedMs, unknownMs, downMs: time('down'), unhealthyMs: time('unhealthy'),
         availabilityPercent: observedMs ? time('up') / observedMs * 100 : null,
