@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, streamUpdate, bytes, ago, duration } from '../api';
 import LogStream from '../components/LogStream';
 import HistoryPanel from '../components/HistoryPanel';
+import ContainerCpuInfo from '../components/ContainerCpuInfo';
 
 function Row({ label, children, mono }) {
   if (children === null || children === undefined || children === '') return null;
@@ -147,6 +148,7 @@ export default function ContainerDetail({ onOpenShell }) {
         <div className="card">
           <h3>CPU</h3>
           <div className="stat-value">{c.stats?.cpu != null ? `${c.stats.cpu.toFixed(1)}%` : '—'}</div>
+          <ContainerCpuInfo stats={c.stats} cpuSet={c.cpuSet} running={c.running} />
         </div>
         <div className="card">
           <h3>Memory</h3>

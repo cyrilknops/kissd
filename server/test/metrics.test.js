@@ -29,6 +29,54 @@ test('history survives a restart and uses private file permissions', (t) => {
   assert.equal(fs.statSync(file).mode & 0o777, 0o600);
 });
 
+test('per-core history survives restart, preserves unknowns and supports existing aggregate-only samples', (t) => {
+  const { db, file } = store(t);
+  sample(db, now - 120_000, 'up', { cpu: 20 });
+  sample(db, now - 90_000, 'up', { cpu: 30, cpuPerCore: [{ id: 0, percent: null }, { id: 2, percent: null }] });
+  sample(db, now - 60_000, 'up', { cpu: 40, cpuPerCore: [{ id: 0, percent: 0 }, { id: 2, percent: 80 }], cpuSet: '0,2' });
+  sample(db, now - 30_000, 'up', { cpu: 50, cpuPerCore: [{ id: 0, percent: 20 }, { id: 2, percent: 100 }], cpuSet: '' });
+  const reopened = new MetricsStore(file);
+  t.after(() => reopened.close());
+  const h = reopened.history({ target: 'container:web', range: '1h', now });
+  assert.deepEqual(h.cpuCores, [0, 2]);
+  assert.deepEqual(h.points.map((p) => p.cpuCore0), [null, null, 0, 20]);
+  assert.deepEqual(h.points.map((p) => p.cpuCore2), [null, null, 80, 100]);
+  assert.equal(h.summary.cpuCore0Avg, 10);
+  assert.equal(h.summary.cpuCore2Peak, 100);
+  assert.equal(h.summary.cpuAvg, 35);
+  assert.equal(h.cpuSet, '');
+});
+
+test('downsampling retains each CPU average and peak without replacing absent CPUs with zero', (t) => {
+  const { db } = store(t);
+  const from = now - 7 * 86400_000;
+  sample(db, from + 30_000, 'up', { cpuPerCore: [{ id: 2, percent: 10 }, { id: 10, percent: 100 }] });
+  sample(db, from + 60_000, 'up', { cpuPerCore: [{ id: 2, percent: 90 }] });
+  sample(db, from + 900_000, 'up', { cpuPerCore: [{ id: 0, percent: 50 }, { id: 10, percent: null }] });
+  const h = db.history({ target: 'container:web', range: '7d', now });
+  assert.deepEqual(h.cpuCores, [0, 2, 10]);
+  assert.equal(h.points.length, 2);
+  assert.equal(h.points[0].cpuCore2, 50);
+  assert.equal(h.points[0].cpuCore2Peak, 90);
+  assert.equal(h.points[0].cpuCore10, 100);
+  assert.equal(h.points[0].cpuCore0, null);
+  assert.equal(h.points[1].cpuCore2, null);
+  assert.equal(h.points[1].cpuCore10, null);
+  assert.equal(h.summary.cpuCore2Avg, 50);
+});
+
+test('per-core series respect retention and ignore invalid CPU IDs', (t) => {
+  const { db } = store(t);
+  sample(db, now - 2 * 86400_000, 'up', { cpuPerCore: [{ id: 99, percent: 50 }] });
+  sample(db, now - 30_000, 'up', { cpuPerCore: [null, { id: -1, percent: 5 }, { id: '0', percent: 5 }, { id: 2, percent: null }] });
+  const h = db.history({ target: 'container:web', range: '7d', retentionDays: 1, now });
+  assert.deepEqual(h.cpuCores, [2]);
+  assert.equal(h.points[0].cpuCore2, null);
+  assert.equal(h.summary.cpuCore2Avg, null);
+  assert.equal(h.summary.cpuCore2Peak, null);
+  assert.deepEqual(db.history({ range: '1h', now }).cpuCores, []);
+});
+
 test('down and unhealthy time are separate from unobserved time', (t) => {
   const { db } = store(t);
   sample(db, now - 120_000);

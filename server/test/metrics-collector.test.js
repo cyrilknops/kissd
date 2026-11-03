@@ -33,6 +33,27 @@ test('collects without browser requests, keeps stable names and derives rates fr
   assert.equal(f.collector.error, null);
 });
 
+test('persists observed host/container CPU series and keeps pinning separate from usage', async () => {
+  const f = fixture();
+  f.host.cpuPerCore = [{ id: 0, percent: null }, { id: 2, percent: null }];
+  f.stats.one.cpuPerCore = null;
+  f.stats.one.cpuSet = '0,2';
+  await f.collector.collect();
+  assert.deepEqual(f.records[0].samples[0].metrics.cpuPerCore, f.host.cpuPerCore);
+  assert.equal(f.records[0].samples[1].metrics.cpuPerCore, null);
+  assert.equal(f.records[0].samples[1].metrics.cpuSet, '0,2');
+  f.advance();
+  f.host.cpuPerCore = [{ id: 0, percent: 20 }, { id: 2, percent: 80 }];
+  f.stats.one.cpuPerCore = [{ id: 0, percent: 0 }, { id: 2, percent: 3 }];
+  await f.collector.collect();
+  assert.deepEqual(f.records[1].samples[0].metrics.cpuPerCore, f.host.cpuPerCore);
+  assert.deepEqual(f.records[1].samples[1].metrics.cpuPerCore, f.stats.one.cpuPerCore);
+  f.advance();
+  f.containers[0].state = 'exited';
+  await f.collector.collect();
+  assert.deepEqual(f.records[2].samples[1].metrics, {});
+});
+
 test('counter resets, recreated containers, and long gaps produce no bogus rate spikes', async () => {
   const f = fixture();
   await f.collector.collect();

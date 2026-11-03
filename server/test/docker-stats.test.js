@@ -27,7 +27,7 @@ test('background and page stats share a completed batch with network, I/O and re
   const [a, b] = await Promise.all([dockerApi.refreshStats(['one']), dockerApi.refreshStats(['one'])]);
   assert.equal(calls, 1);
   assert.equal(a, b);
-  assert.deepEqual(a.one, { cpu: 40, memory: 150, memoryLimit: 1000, rxBytes: 120, txBytes: 230, readBytes: 50, writeBytes: 60, pids: 5, restartCount: 3, oomKilled: false });
+  assert.deepEqual(a.one, { cpu: 40, cpuPerCore: null, cpuSet: null, memory: 150, memoryLimit: 1000, rxBytes: 120, txBytes: 230, readBytes: 50, writeBytes: 60, pids: 5, restartCount: 3, oomKilled: false });
   assert.equal(dockerApi.stats(['one']), a);
   assert.equal(await dockerApi.statsOne('one'), a.one);
   assert.equal(calls, 1);
@@ -53,4 +53,44 @@ test('Docker sampling failures return missing data and first CPU readings do not
   assert.equal(data.failed, null);
   assert.equal(data.warmup.cpu, null);
   assert.equal(data.warmup.restartCount, null);
+});
+
+test('container per-core deltas identify actual CPU use independently of configured pinning', async (t) => {
+  t.mock.method(dockerApi.docker, 'getContainer', () => ({
+    stats: async () => ({
+      precpu_stats: { cpu_usage: { total_usage: 100, percpu_usage: [0, 0, 100, 0] }, system_cpu_usage: 1000 },
+      cpu_stats: { cpu_usage: { total_usage: 250, percpu_usage: [50, 100, 100, 0] }, system_cpu_usage: 2000, online_cpus: 4 },
+    }),
+    inspect: async () => ({ HostConfig: { CpusetCpus: '0-2' }, State: { Running: true } }),
+  }));
+  const s = await dockerApi.statsOne('per-core');
+  assert.equal(s.cpu, 60);
+  assert.deepEqual(s.cpuPerCore, [
+    { id: 0, percent: 20 }, { id: 1, percent: 40 }, { id: 2, percent: 0 }, { id: 3, percent: 0 },
+  ]);
+  assert.equal(s.cpuSet, '0-2');
+  assert.equal((await dockerApi.detail('per-core')).cpuSet, '0-2');
+});
+
+test('missing Docker counters never imply a core assignment; resets and new CPUs need baselines', async (t) => {
+  const samples = {
+    unsupported: { cpu_stats: { cpu_usage: { total_usage: 100 }, system_cpu_usage: 2000 } },
+    first: { cpu_stats: { cpu_usage: { total_usage: 100, percpu_usage: [50, 50] }, system_cpu_usage: 2000 } },
+    reset: {
+      precpu_stats: { cpu_usage: { total_usage: 100, percpu_usage: [100, 0] }, system_cpu_usage: 1000 },
+      cpu_stats: { cpu_usage: { total_usage: 250, percpu_usage: [1, 100, 100] }, system_cpu_usage: 2000, online_cpus: 4 },
+    },
+    unchanged: {
+      precpu_stats: { cpu_usage: { total_usage: 100, percpu_usage: [50, 50] }, system_cpu_usage: 2000 },
+      cpu_stats: { cpu_usage: { total_usage: 100, percpu_usage: [50, 50] }, system_cpu_usage: 2000 },
+    },
+  };
+  t.mock.method(dockerApi.docker, 'getContainer', (id) => ({
+    stats: async () => samples[id], inspect: async () => ({ HostConfig: { CpusetCpus: '' } }),
+  }));
+  assert.equal((await dockerApi.statsOne('unsupported')).cpuPerCore, null);
+  assert.equal((await dockerApi.statsOne('unsupported')).cpuSet, '');
+  assert.deepEqual((await dockerApi.statsOne('first')).cpuPerCore, [{ id: 0, percent: null }, { id: 1, percent: null }]);
+  assert.deepEqual((await dockerApi.statsOne('reset')).cpuPerCore, [{ id: 0, percent: null }, { id: 1, percent: 40 }, { id: 2, percent: null }]);
+  assert.deepEqual((await dockerApi.statsOne('unchanged')).cpuPerCore, [{ id: 0, percent: null }, { id: 1, percent: null }]);
 });
