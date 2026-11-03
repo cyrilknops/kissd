@@ -18,7 +18,7 @@ import * as mute from './mute.js';
 import * as metrics from './metrics.js';
 import { registerMetricsRoutes } from './metrics-routes.js';
 import {registerDeploymentGuards} from './deployment-guards.js';
-import {policySummary} from './guarded-updates.js';
+import {policySummary,withMaintenance} from './guarded-updates.js';
 import { send as ntfySend } from './ntfy.js';
 import { handleTerminal, handleLogs } from './terminal.js';
 
@@ -157,14 +157,14 @@ app.post('/api/containers/:id/update', auth.requireAuth, async (req, res) => {
         res.write('Updating kissd itself.\n');
         res.write('Handing the compose run to the host so it survives this container being replaced.\n');
         res.write('The panel will drop out for a few seconds — reload once it returns.\n');
-        await dockerApi.updateSelfDetached(compose);
+        await withMaintenance(()=>dockerApi.updateSelfDetached(compose));
         // Nothing here ever sees a detached run finish — and this process is
         // about to be replaced — so the mute gets a fixed window on disk.
         mute.muteFor(keys, mute.DETACHED_SECONDS);
         return res.end();
       }
 
-      const code = await dockerApi.update(compose, (chunk) => res.write(chunk));
+      const code = await withMaintenance(()=>dockerApi.update(compose, (chunk) => res.write(chunk)));
       res.write(code === 0 ? '\nUpdate complete.\n' : `\nUpdate failed (exit ${code}).\n`);
       return res.end();
     } finally {
@@ -185,7 +185,7 @@ app.post('/api/containers/:id/:action', auth.requireAuth, async (req, res) => {
     return res.status(400).json({ error: `Unsupported action: ${action}` });
   }
   try {
-    await dockerApi.action(id, action);
+    await withMaintenance(()=>dockerApi.action(id, action));
     return res.json({ ok: true });
   } catch (err) {
     return res.status(500).json({ error: err.message });
@@ -207,7 +207,7 @@ app.post('/api/system/prune/:target', auth.requireAuth, async (req, res) => {
     return res.status(400).json({ error: 'Unknown prune target' });
   }
   try {
-    return res.json(await system.prune(req.params.target));
+    return res.json(await withMaintenance(()=>system.prune(req.params.target)));
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }

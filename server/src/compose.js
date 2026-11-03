@@ -8,7 +8,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { docker, composeInfo, updateSelfDetached, restartSelfDetached, SELF_NAME } from './docker.js';
 import * as registry from './registry.js';
-import {readPolicy,policySummary,assertIdle,assertPlainAction,createGuardedUpdater,runCommand} from './guarded-updates.js';
+import {readPolicy,policySummary,assertIdle,assertPlainAction,createGuardedUpdater,runCommand,withMaintenance} from './guarded-updates.js';
 
 const DATA_DIR = process.env.DATA_DIR || '/data';
 const BACKUP_DIR = path.join(DATA_DIR, 'compose-backups');
@@ -182,9 +182,7 @@ function streamSteps(project, steps, onData) {
 // Streams `docker compose up -d` for the whole project.
 export async function apply(projectName, onData) {
   const project = await findProject(projectName);
-  await assertPlainAction(project);
-  if(project.hasSelf)await ensureNoGuardedRuns();
-  return streamSteps(project, [composeArgs(project, 'up', ['-d'])], onData);
+  return withMaintenance(async()=>{await assertPlainAction(project);if(project.hasSelf)await ensureNoGuardedRuns();return streamSteps(project,[composeArgs(project,'up',['-d'])],onData);});
 }
 
 // Returned instead of an exit code when the run was handed to the host. There
@@ -206,6 +204,7 @@ export async function update(projectName, onData) {
     }});
     return updater.update(project,policy,onData);
   }
+  return withMaintenance(async()=>{
   await assertIdle(project);
 
   if (project.hasSelf) {
@@ -221,6 +220,7 @@ export async function update(projectName, onData) {
     composeArgs(project, 'pull', ['--ignore-buildable']),
     composeArgs(project, 'up', ['-d']),
   ], onData);
+  });
 }
 
 // Stops and starts every container in the project, and nothing more: no pull,
@@ -229,6 +229,7 @@ export async function update(projectName, onData) {
 // Save & apply are for.
 export async function restart(projectName, onData) {
   const project = await findProject(projectName);
+  return withMaintenance(async()=>{
   await assertPlainAction(project);
 
   if (project.hasSelf) {
@@ -241,6 +242,7 @@ export async function restart(projectName, onData) {
   }
 
   return streamSteps(project, [composeArgs(project, 'restart')], onData);
+  });
 }
 
 export async function backups(projectName) {
