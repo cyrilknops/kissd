@@ -109,3 +109,18 @@ service, and PostgreSQL backups. They do not support replacing kissd itself thro
 a guarded project policy. Health checks and the CI approval must match the application;
 a successful deployment does not establish its performance capacity. Keep a recovery
 window, external backups, and release-specific migration review.
+
+## Reproducible Docker integration check
+
+`integration/guarded-update.mjs` runs inside an isolated candidate panel with its own
+fixture password, data volume, Docker socket, and a dedicated empty workspace bind.
+It requires `SELF_NAME=kissd-safe-panel-<8-hex-id>` and `KISSD_INTEGRATION_ONLY=1`.
+Never set these on the live panel. Supply the workspace path
+`.../kissd-safe-checks-<8-hex-id>`, the verified candidate image by digest, and the
+installed registry image ID as its three arguments.
+
+The check creates a local-only temporary registry, tiny API/web fixtures and a real
+PostgreSQL database. It exercises successful sequential replacement, verified backup,
+a healthy no-op, refusal of bypass controls, failed-health rollback, and preservation
+of database writes made during rollback. It cleans up its uniquely named stack and
+registry. The production database and application projects are not test targets.
