@@ -7,6 +7,7 @@ import { spawn } from 'node:child_process';
 import { pipeline } from 'node:stream/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 import { parseDocument } from 'yaml';
+import { validTracking, resolveLatest } from './latest-images.js';
 
 const MAX = 512 * 1024;
 const active = new Map();
@@ -107,6 +108,7 @@ export async function readPolicy(project) {
     !p.approvedImages ||
     p.services.some((s) => !pin.test(p.approvedImages[s])) ||
     !sha.test(p.approvedRevision) ||
+    (p.imageTags !== undefined && !validTracking(p)) ||
     !/^[a-f0-9]{64}$/.test(p.configurationHash) ||
     p.backwardCompatible !== true ||
     !Array.isArray(p.preflight) ||
@@ -124,7 +126,7 @@ export async function policySummary(project) {
   try {
     const p = await readPolicy(project);
     return p
-      ? { mode: 'guarded', services: p.services, approvedRevision: p.approvedRevision }
+      ? { mode: 'guarded', services: p.services, approvedRevision: p.approvedRevision, tracksLatest: Boolean(p.imageTags) }
       : null;
   } catch {
     return { mode: 'blocked', message: 'Update policy needs attention' };
@@ -269,14 +271,17 @@ async function unchanged(project, state) {
     );
 }
 function oldCompose(source, old) {
+  return pinnedCompose(source, Object.fromEntries(Object.entries(old).map(([s,x])=>[s,x.Config.Image])));
+}
+function pinnedCompose(source, refs) {
   if (source.trimStart().startsWith('{')) {
     const c = JSON.parse(source);
-    for (const [s, x] of Object.entries(old)) c.services[s].image = x.Config.Image;
+    for (const [s, ref] of Object.entries(refs)) c.services[s].image = ref;
     return JSON.stringify(c, null, 2) + '\n';
   }
   const doc = parseDocument(source);
   if (doc.errors.length) throw Error('Compose cannot be prepared for rollback');
-  for (const [s, x] of Object.entries(old)) doc.setIn(['services', s, 'image'], x.Config.Image);
+  for (const [s, ref] of Object.entries(refs)) doc.setIn(['services', s, 'image'], ref);
   return String(doc);
 }
 export function createGuardedUpdater({
@@ -340,24 +345,26 @@ export function createGuardedUpdater({
     );
     if (configurationHash(cfg, policy.services) !== policy.configurationHash)
       throw Error('Deployment configuration differs from the approved policy');
+    const latest = policy.imageTags ? await resolveLatest(policy, cfg, run, emit) : null;
     const old = {},
       desired = {},
       protectedBefore = {};
     for (const service of policy.services) {
       const ref = cfg.services?.[service]?.image;
       if (!pin.test(ref)) throw Error('Application images must be pinned by digest');
-      if (policy.approvedImages?.[service] !== ref)
+      if (!latest && policy.approvedImages?.[service] !== ref)
         throw Error('Application image is not the approved image');
       old[service] = await inspect(service, project);
       if (!pin.test(old[service].Config.Image))
         throw Error('Running application images must be pinned by digest');
       if (!old[service].State.Running) throw Error('Current release is not running');
-      desired[service] = await image(service, ref, policy, emit);
+      desired[service] = latest ? latest.images[service] : await image(service, ref, policy, emit);
     }
     for (const service of Object.keys(cfg.services).filter((s) => !policy.services.includes(s)))
       protectedBefore[service] = fingerprint(await inspect(service, project));
     return {
       state,
+      latest,
       old,
       desired,
       protectedBefore,
@@ -485,6 +492,7 @@ export function createGuardedUpdater({
   }
   async function execute(project, policy, emit, job) {
     const plan = await prepare(project, policy, emit);
+    if (plan.latest) await job.record({revision:plan.latest.revision,targetImages:plan.latest.refs});
     await check(policy.preflight, project);
     await healthy(project, policy);
     if (!plan.changed.length) {
@@ -508,6 +516,12 @@ export function createGuardedUpdater({
       ),
     });
     emit('Database archive verified. Starting sequential update.\n');
+    if (plan.latest) {
+      const source = pinnedCompose(plan.state[project.files[0]], plan.latest.refs);
+      await unchanged(project,plan.state);
+      await atomic(project.files[0],source,plan.fileMode);
+      plan.state = {...plan.state,[project.files[0]]:source};
+    }
     const touched = [];
     try {
       for (const service of sequence.filter((s) => plan.changed.includes(s))) {
